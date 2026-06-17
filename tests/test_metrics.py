@@ -159,3 +159,97 @@ class TestSummarize:
         with patch.object(metrics, "METRICS_FILE", f):
             result = metrics.summarize()
         assert isinstance(result, str)
+
+
+class TestAggregate:
+    def test_empty_file_returns_zero_totals(self, tmp_path):
+        f = str(tmp_path / "m.jsonl")
+        with patch.object(metrics, "METRICS_FILE", f):
+            result = metrics.aggregate()
+        assert isinstance(result, dict)
+        assert result["workflow"]["total"] == 0
+        assert result["workflow"]["outcome_counts"] == {}
+        assert result["workflow"]["avg_retries"] == 0.0
+        assert result["workflow"]["recent"] == []
+        assert result["ollama"]["total"] == 0
+        assert result["ollama"]["by_model"] == []
+        assert result["ollama"]["approx_tokens_in"] == 0
+        assert result["ollama"]["approx_tokens_out"] == 0
+
+    def test_mixed_workflow_outcomes_and_avg_retries(self, tmp_path):
+        f = str(tmp_path / "m.jsonl")
+        with open(f, "w") as fh:
+            for outcome, retries in [("approved", 0), ("approved", 2), ("rejected", 1)]:
+                fh.write(json.dumps({
+                    "ts": 1750000000.0, "phase": "workflow",
+                    "model": "m", "outcome": outcome, "meta": {"retries": retries, "task": "test"},
+                }) + "\n")
+        with patch.object(metrics, "METRICS_FILE", f):
+            result = metrics.aggregate()
+        assert result["workflow"]["total"] == 3
+        assert result["workflow"]["outcome_counts"] == {"approved": 2, "rejected": 1}
+        assert result["workflow"]["avg_retries"] == (0 + 2 + 1) / 3
+        assert len(result["workflow"]["recent"]) == 3
+
+    def test_ollama_records_by_model_stats(self, tmp_path):
+        f = str(tmp_path / "m.jsonl")
+        with open(f, "w") as fh:
+            fh.write(json.dumps({
+                "ts": 1750000000.0,
+                "phase": "ollama_call",
+                "model": "qwen2.5-coder:7b",
+                "outcome": "success",
+                "meta": {"prompt_chars": 4000, "response_chars": 400, "duration_ms": 5000},
+            }) + "\n")
+            fh.write(json.dumps({
+                "ts": 1750000001.0,
+                "phase": "ollama_call",
+                "model": "qwen2.5-coder:7b",
+                "outcome": "success",
+                "meta": {"prompt_chars": 2000, "response_chars": 200, "duration_ms": 3000},
+            }) + "\n")
+        with patch.object(metrics, "METRICS_FILE", f):
+            result = metrics.aggregate()
+        assert result["ollama"]["total"] == 2
+        assert len(result["ollama"]["by_model"]) == 1
+        model_entry = result["ollama"]["by_model"][0]
+        assert model_entry["model"] == "qwen2.5-coder:7b"
+        assert model_entry["calls"] == 2
+        assert model_entry["avg_latency_ms"] == (5000 + 3000) / 2
+        assert model_entry["errors"] == 0
+        assert result["ollama"]["approx_tokens_in"] == (4000 + 2000) // 4
+        assert result["ollama"]["approx_tokens_out"] == (400 + 200) // 4
+
+    def test_workflow_and_ollama_records_with_missing_meta_do_not_crash(self, tmp_path):
+        f = str(tmp_path / "m.jsonl")
+        with open(f, "w") as fh:
+            fh.write(json.dumps({"ts": 1750000000.0, "phase": "workflow", "outcome": "approved"}) + "\n")
+            fh.write(json.dumps({"ts": 1750000001.0, "phase": "ollama_call", "outcome": "success"}) + "\n")
+        with patch.object(metrics, "METRICS_FILE", f):
+            result = metrics.aggregate()
+        assert isinstance(result, dict)
+        assert result["workflow"]["total"] == 1
+        assert result["workflow"]["outcome_counts"] == {"approved": 1}
+        assert result["workflow"]["avg_retries"] == 0.0
+        assert result["ollama"]["total"] == 1
+        assert len(result["ollama"]["by_model"]) == 1
+        assert result["ollama"]["approx_tokens_in"] == 0
+        assert result["ollama"]["approx_tokens_out"] == 0
+
+    def test_recent_runs_limited_to_last_10(self, tmp_path):
+        f = str(tmp_path / "m.jsonl")
+        with open(f, "w") as fh:
+            for i in range(15):
+                fh.write(json.dumps({
+                    "ts": 1750000000.0 + i,
+                    "phase": "workflow",
+                    "outcome": "approved",
+                    "meta": {"retries": 0, "task": f"task-{i}"},
+                }) + "\n")
+        with patch.object(metrics, "METRICS_FILE", f):
+            result = metrics.aggregate()
+        assert result["workflow"]["total"] == 15
+        assert len(result["workflow"]["recent"]) == 10
+        # Recent list is in reverse chronological order (newest first)
+        assert result["workflow"]["recent"][0]["task"] == "task-14"
+        assert result["workflow"]["recent"][-1]["task"] == "task-5"

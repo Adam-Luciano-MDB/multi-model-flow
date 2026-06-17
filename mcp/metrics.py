@@ -103,5 +103,90 @@ def summarize() -> str:
     return "\n".join(lines)
 
 
+def aggregate() -> dict:
+    """
+    Aggregate metrics into a JSON-serializable dict for the UI/API.
+
+    Returns a dict with 'workflow' and 'ollama' keys containing aggregated stats,
+    token estimates, and recent run details. Safely handles missing meta fields
+    using .get() to avoid crashes.
+    """
+    records = read_all()
+    workflow_records = [r for r in records if r.get("phase") == "workflow"]
+    ollama_records = [r for r in records if r.get("phase") == "ollama_call"]
+
+    # ── Workflow aggregation ──────────────────────────────────────────────────
+    workflow_section = {
+        "total": len(workflow_records),
+        "outcome_counts": {},
+        "avg_retries": 0.0,
+        "recent": [],
+    }
+
+    if workflow_records:
+        outcome_counts: dict[str, int] = defaultdict(int)
+        total_retries = 0
+        for r in workflow_records:
+            outcome_counts[r.get("outcome", "unknown")] += 1
+            total_retries += r.get("meta", {}).get("retries", 0)
+        workflow_section["outcome_counts"] = dict(outcome_counts)
+        workflow_section["avg_retries"] = total_retries / len(workflow_records)
+
+        # Recent runs (newest first, last 10)
+        for r in reversed(workflow_records[-10:]):
+            meta = r.get("meta", {})
+            recent_item = {
+                "ts": r.get("ts", 0.0),
+                "outcome": r.get("outcome", "unknown"),
+                "steps_planned": meta.get("steps_planned"),
+                "files_written": meta.get("files_written"),
+                "retries": meta.get("retries", 0),
+                "task": meta.get("task", ""),
+            }
+            workflow_section["recent"].append(recent_item)
+
+    # ── Ollama aggregation ────────────────────────────────────────────────────
+    ollama_section = {
+        "total": len(ollama_records),
+        "by_model": [],
+        "approx_tokens_in": 0,
+        "approx_tokens_out": 0,
+    }
+
+    if ollama_records:
+        by_model: dict[str, list] = defaultdict(list)
+        for r in ollama_records:
+            by_model[r.get("model", "unknown")].append(r)
+
+        # Per-model stats
+        for model in sorted(by_model.keys()):
+            calls = by_model[model]
+            errors = sum(1 for c in calls if c.get("outcome") == "error")
+            durations = [
+                c["meta"]["duration_ms"]
+                for c in calls
+                if c.get("meta", {}).get("duration_ms") is not None
+            ]
+            avg_latency_ms = sum(durations) / len(durations) if durations else None
+            model_item = {
+                "model": model,
+                "calls": len(calls),
+                "avg_latency_ms": avg_latency_ms,
+                "errors": errors,
+            }
+            ollama_section["by_model"].append(model_item)
+
+        # Token estimates
+        total_in = sum(r.get("meta", {}).get("prompt_chars", 0) for r in ollama_records)
+        total_out = sum(r.get("meta", {}).get("response_chars", 0) for r in ollama_records)
+        ollama_section["approx_tokens_in"] = total_in // 4
+        ollama_section["approx_tokens_out"] = total_out // 4
+
+    return {
+        "workflow": workflow_section,
+        "ollama": ollama_section,
+    }
+
+
 if __name__ == "__main__":
     print(summarize())

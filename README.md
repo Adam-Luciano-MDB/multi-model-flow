@@ -245,7 +245,7 @@ Total: 18 calls
   Model                           Calls  Avg latency  Errors
   ----------------------------------------------------------
   devstral:latest                     3        14.1s       0
-  qwen2.5-coder:7b                   15         9.3s       0
+  qwen2.5-coder:7b                    15         9.3s       0
 
 Approx tokens in:  48,000  (from 192,000 chars)
 Approx tokens out: 12,000  (from  48,000 chars)
@@ -259,6 +259,30 @@ Use the Claude Console for cost reporting on those tiers.
 - `retries` > 0 — task descriptions that caused reviewer rejection; tighten the description or CLAUDE.md
 - Ollama `avg latency` — if consistently > 30s, try a smaller quantization or model size
 - Ollama `Errors` > 0 — Ollama went offline mid-run; check `ollama serve`
+
+### View metrics in a web dashboard
+
+For interactive exploration of workflow runs and per-model latency metrics, start
+the metrics UI server:
+
+```bash
+bash scripts/show_metrics_ui.sh
+```
+
+By default this launches a read-only dashboard on `http://127.0.0.1:8765`. Pass
+`--port <number>` to use a different port.
+
+The dashboard displays:
+- **Workflow summary cards** — total runs, outcome distribution, average retries,
+  recent task descriptions
+- **Outcome breakdown** — doughnut chart of approved vs approved_with_notes vs rejected
+- **Per-model performance** — bar chart and table of Ollama model calls, average
+  latencies, and error counts
+- **Token usage** — approximate tokens consumed in/out (derived from character counts)
+- **Recent runs table** — last 10 workflow executions with timestamps, outcomes, and
+  file/step counts
+
+The UI is read-only (no writes to metrics.jsonl) and local-only (binds to 127.0.0.1).
 
 ---
 
@@ -492,3 +516,4 @@ then re-invoke to proceed.
 
 If Node.js is not available, use the `ollama-local recommend_model` tool as a
 fallback — it works without Node.js using RAM-based heuristics.
+</content>
