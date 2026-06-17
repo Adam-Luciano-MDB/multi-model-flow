@@ -4,9 +4,15 @@
 
 A three-agent Claude Code workflow that routes bulk implementation work to cheap
 models (Haiku / local Ollama) while reserving Opus for planning and high-stakes
-review. Sonnet reviews every run; if its confidence score is below 8/10 it
-automatically escalates to Opus for a second opinion. Drop it into any codebase;
-it is framework and language agnostic.
+review. Both the plan and the review carry confidence scores:
+
+- **Plan (Opus)** — if confidence < 7/10, Fable refines the plan (or Opus
+  self-validates if Fable is unavailable). The workflow never halts; it warns
+  you and continues with the best available plan.
+- **Review (Sonnet)** — if confidence < 8/10, Opus is called for an independent
+  second opinion before the verdict is accepted.
+
+Drop it into any codebase; it is framework and language agnostic.
 
 ---
 
@@ -26,8 +32,9 @@ In Claude Code, type:
 /dev-task-workflow Create a CSV parser utility with unit tests.
 ```
 
-You'll watch Opus plan → Haiku build → Sonnet review (escalates to Opus if
-confidence < 8). When it finishes, see what ran and how long it took:
+You'll watch Opus plan (Fable/Opus validates if plan confidence < 7) → Haiku
+build → Sonnet review (escalates to Opus if review confidence < 8). When it
+finishes, see what ran and how long it took:
 
 ```bash
 ./scripts/show_metrics.sh
@@ -43,41 +50,53 @@ That's the whole loop. Everything below is reference detail.
 User task description
         │
         ▼
-┌───────────────┐  JSON plan   ┌──────────────────┐  files_written  ┌───────────────────┐
-│   Planner     │ ────────────►│     Worker        │ ───────────────►│  Reviewer         │
-│   (opus)      │              │  (haiku or ollama)│                 │  (sonnet)         │
-└───────────────┘              └──────────────────┘                 └─────────┬─────────┘
-                                        │                                      │
-                                   (optional)                       confidence score 1–10
-                                        │                                      │
-                                        ▼                           ┌──────────▼──────────┐
-                               ┌────────────────┐                  │   confidence ≥ 8?   │
-                               │   Ollama MCP   │                  └──────────┬──────────┘
-                               │  (local, free) │               no ▼          │ yes
-                               └────────────────┘        ┌───────────────┐    │
-                                                          │ Opus escalated│    │
-                                                          │    review     │    │
-                                                          └───────┬───────┘    │
-                                                                  └─────┬──────┘
-                                                                        │ verdict JSON
-                                                                        ▼
-                                                          ┌─────────────────────────┐
-                                                          │  metrics.jsonl          │
-                                                          │  + web dashboard :8765  │
-                                                          └─────────────────────────┘
+┌───────────────┐
+│   Planner     │
+│   (opus)      │
+└───────┬───────┘
+        │ confidence score 1–10
+        ▼
+┌───────────────────────┐
+│   confidence ≥ 7?     │
+└───────┬───────────────┘
+   no ▼                │ yes
+┌──────────────┐        │
+│ Fable refine │        │        ┌──────────────────┐  files_written  ┌───────────────────┐
+│ (or Opus     │        ├───────►│     Worker        │ ───────────────►│  Reviewer         │
+│  self-check) │        │        │  (haiku or ollama)│                 │  (sonnet)         │
+└──────┬───────┘        │        └────────┬─────────┘                 └─────────┬─────────┘
+       │  ⚠ warn user   │             (optional)                      confidence score 1–10
+       └────────────────┘                 │                                      │
+                                          ▼                           ┌──────────▼──────────┐
+                                 ┌────────────────┐                  │   confidence ≥ 8?   │
+                                 │   Ollama MCP   │                  └──────────┬──────────┘
+                                 │  (local, free) │               no ▼          │ yes
+                                 └────────────────┘        ┌───────────────┐    │
+                                                            │ Opus escalated│    │
+                                                            │    review     │    │
+                                                            └───────┬───────┘    │
+                                                                    └──────┬─────┘
+                                                                           │ verdict JSON
+                                                                           ▼
+                                                            ┌──────────────────────────┐
+                                                            │  metrics.jsonl           │
+                                                            │  + web dashboard :8765   │
+                                                            └──────────────────────────┘
 ```
 
 ---
 
 ## Cost model
 
-| Phase            | Agent    | Model (alias) | When                                                      |
-|------------------|----------|---------------|-----------------------------------------------------------|
-| Plan             | Planner  | `opus`        | Always — ambiguous inputs, cross-file reasoning           |
-| Execute          | Worker   | `haiku`       | Default — deterministic, instruction-following, high volume|
-| Execute          | Worker   | Ollama (opt.) | On-prem / long-running / cost-free generation             |
-| Review           | Reviewer | `sonnet`      | Always — quality bar without Opus cost                    |
-| Review (escalate)| Reviewer | `opus`        | When Sonnet confidence < 8/10 — independent second opinion|
+| Phase             | Agent    | Model              | When                                                      |
+|-------------------|----------|--------------------|-----------------------------------------------------------|
+| Plan              | Planner  | `opus`             | Always — ambiguous inputs, cross-file reasoning           |
+| Plan (strengthen) | Planner  | `claude-fable-5`   | When Opus plan confidence < 7/10 — refine and fill gaps   |
+| Plan (self-check) | Planner  | `opus`             | When Fable unavailable and plan confidence < 7/10         |
+| Execute           | Worker   | `haiku`            | Default — deterministic, instruction-following, high volume|
+| Execute           | Worker   | Ollama (opt.)      | On-prem / long-running / cost-free generation             |
+| Review            | Reviewer | `sonnet`           | Always — quality bar without Opus cost                    |
+| Review (escalate) | Reviewer | `opus`             | When Sonnet confidence < 8/10 — independent second opinion|
 
 The agent `model:` frontmatter uses **tier aliases** (`opus`, `sonnet`, `haiku`)
 rather than pinned version IDs. Aliases always resolve to the latest model in
@@ -184,13 +203,16 @@ caps requests at 100/minute per IP.
 ```
 
 The workflow:
-1. Planner produces a JSON plan and **pauses for your confirmation if
-   `risk_level` is `"high"`**
-2. Worker executes each step in order, writing files
-3. Sonnet reviews the result and returns a verdict with a **confidence score
-   (1–10)**. If confidence is below 8, Opus is automatically called for an
-   independent second review
-4. If rejected with `new_plan_needed: true`, the workflow replans and retries
+1. Opus produces a JSON plan with a **confidence score (1–10)**. If confidence
+   is below 7, Fable refines the plan (or Opus self-validates if Fable is
+   unavailable). Either way the workflow continues — you are warned in the log
+   if confidence was low.
+2. **Pauses for your confirmation if `risk_level` is `"high"`** (skip with
+   auto mode)
+3. Worker executes each step in order, writing files
+4. Sonnet reviews the result and returns a verdict with its own **confidence
+   score (1–10)**. If below 8, Opus is called for an independent second review
+5. If rejected with `new_plan_needed: true`, the workflow replans and retries
    (capped at 2 retries)
 
 ### Autonomous mode (unattended)
@@ -463,6 +485,7 @@ All inter-agent communication is structured JSON. Keep these schemas stable.
 {
   "task_summary": "one sentence describing the task and any assumptions",
   "risk_level": "low|medium|high",
+  "confidence": 8,
   "steps": [
     {
       "step_id": 1,
@@ -478,6 +501,11 @@ All inter-agent communication is structured JSON. Keep these schemas stable.
   ]
 }
 ```
+
+`confidence` is 1–10. If Opus scores its own plan below 7, the workflow
+automatically asks Fable to refine it (or Opus to self-validate if Fable is
+unavailable). The workflow never halts on low plan confidence — it warns and
+continues with the best available plan.
 
 ### Worker completion signal
 
@@ -586,6 +614,19 @@ then re-invoke to proceed.
 
 If Node.js is not available, use the `ollama-local recommend_model` tool as a
 fallback — it works without Node.js using RAM-based heuristics.
+
+### Plan confidence is consistently low
+
+If the planner regularly scores below 7, the task descriptions are likely
+underspecified. Options:
+- Add more context to `CLAUDE.md` (tech stack, file layout, conventions)
+- Include specific file paths or function names in your task description
+- Break the task into smaller, well-scoped sub-tasks
+- Lower the threshold by editing the `planConfidence < 7` check in
+  `.claude/workflows/dev-task-workflow.js`
+
+If Fable is unavailable in your Claude Code plan, Opus self-validates instead —
+this costs an extra Opus call but produces the same strengthening effect.
 
 ### Opus escalation fires on every run
 

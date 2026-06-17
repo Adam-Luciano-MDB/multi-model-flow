@@ -2,9 +2,9 @@ export const meta = {
   name: "dev-task-workflow",
   description: "Three-phase Planner → Worker → Reviewer workflow for cost-optimised coding tasks",
   phases: [
-    { title: "Plan", detail: "Opus planner decomposes the task into a JSON execution plan" },
+    { title: "Plan", detail: "Opus planner decomposes the task; Fable or Opus validates if confidence < 7" },
     { title: "Execute", detail: "Haiku worker executes each step sequentially" },
-    { title: "Review", detail: "Sonnet reviewer verifies correctness and style" },
+    { title: "Review", detail: "Sonnet reviewer verifies correctness; Opus escalates if confidence < 8" },
   ],
 }
 
@@ -48,7 +48,56 @@ while (retryCount <= MAX_RETRIES) {
   }
 
   runStepsPlanned = plan.steps.length
-  log(`Plan ready — ${plan.steps.length} step(s), risk: ${plan.risk_level}`)
+  const planConfidence = typeof plan.confidence === "number" ? plan.confidence : 10
+  log(`Plan ready — ${plan.steps.length} step(s), risk: ${plan.risk_level}, confidence: ${planConfidence}/10`)
+
+  // ── Plan confidence check ────────────────────────────────────────────────
+  // If Opus scored its own plan below 7, ask Fable to strengthen it.
+  // Fall back to an Opus self-validation pass if Fable is unavailable.
+  // Never halts the workflow — uses the best plan available and warns the user.
+  if (planConfidence < 7) {
+    log(`⚠ LOW PLAN CONFIDENCE (${planConfidence}/10) — attempting to strengthen the plan`)
+
+    const strengthenPrompt = `The following execution plan was produced with low confidence (${planConfidence}/10).
+Review it critically: identify ambiguities, fill gaps, and return an improved plan JSON.
+If the plan is already sound, return it as-is with an updated confidence score.
+
+Original plan:
+${JSON.stringify(plan, null, 2)}
+
+Task: ${currentTask}`
+
+    // Try Fable first; agent() returns null when the model is unavailable.
+    let strengthenedText = await agent(strengthenPrompt, {
+      label: "planner:fable",
+      phase: "Plan",
+      model: "claude-fable-5",
+    })
+
+    if (!strengthenedText) {
+      log(`Fable unavailable — asking Opus to self-validate the plan`)
+      strengthenedText = await agent(strengthenPrompt, {
+        label: "planner:opus-validate",
+        phase: "Plan",
+        model: "opus",
+      })
+    }
+
+    if (strengthenedText) {
+      try {
+        const jsonMatch = strengthenedText.match(/\{[\s\S]*\}/)
+        if (!jsonMatch) throw new Error("no JSON")
+        const strengthened = JSON.parse(jsonMatch[0])
+        plan = strengthened
+        runStepsPlanned = plan.steps.length
+        log(`Plan strengthened (new confidence: ${plan.confidence ?? "n/a"}/10)`)
+      } catch {
+        log(`WARNING: Could not parse strengthened plan — using original`)
+      }
+    }
+
+    log(`⚠ NOTE: Initial plan confidence was low (${planConfidence}/10). Review the output carefully.`)
+  }
 
   if (plan.risk_level === "high" && !autoMode) {
     log(

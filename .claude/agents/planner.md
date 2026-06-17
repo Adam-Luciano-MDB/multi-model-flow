@@ -18,6 +18,7 @@ For every task:
 {
   "task_summary": "one sentence",
   "risk_level": "low|medium|high",
+  "confidence": 8,
   "steps": [
     {
       "step_id": 1,
@@ -33,6 +34,14 @@ For every task:
   ]
 }
 ```
+
+`confidence` is an integer 1–10 reflecting how well you understand the task:
+- **9–10**: requirements are unambiguous, you read all relevant files, no unknowns
+- **7–8**: minor gaps (e.g. one dependency not checked) but the plan is sound
+- **5–6**: significant ambiguity — assumptions were required, context was limited
+- **1–4**: high uncertainty — missing requirements, unfamiliar codebase, or the task is underspecified
+
+Be honest. A score below 7 triggers an automatic plan-strengthening pass.
 
 Never skip the JSON. Never produce partial plans. Prefer many small, verifiable
 steps over a few large ones. If the request is ambiguous, list your assumptions
