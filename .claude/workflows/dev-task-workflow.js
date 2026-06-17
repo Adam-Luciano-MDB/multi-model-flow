@@ -15,6 +15,14 @@ const MAX_RETRIES = 2
 let retryCount = 0
 let currentTask = taskDescription
 
+// Metrics accumulators — set throughout the loop, flushed once at the end.
+// Date.now() is unavailable in workflow scripts; timestamps are added by the
+// metrics writer on the Python side.
+let runOutcome = "halted"
+let runStepsPlanned = 0
+let runFilesWritten = []
+let runRetries = 0
+
 while (retryCount <= MAX_RETRIES) {
   // ─── Phase 1: Plan ───────────────────────────────────────────────────────
 
@@ -33,16 +41,18 @@ while (retryCount <= MAX_RETRIES) {
     plan = JSON.parse(jsonMatch[0])
   } catch (e) {
     log(`ERROR: Planner did not return valid JSON. Raw output:\n${planText}`)
+    runOutcome = "plan_parse_error"
     break
   }
 
+  runStepsPlanned = plan.steps.length
   log(`Plan ready — ${plan.steps.length} step(s), risk: ${plan.risk_level}`)
 
   if (plan.risk_level === "high") {
     log(
       `HIGH RISK PLAN — please review before proceeding:\n${JSON.stringify(plan, null, 2)}\n\nRe-invoke the workflow with user approval to continue.`
     )
-    // Halt and let the user decide; do not auto-proceed on high-risk plans.
+    runOutcome = "high_risk"
     break
   }
 
@@ -98,8 +108,11 @@ Execute ONLY step_id ${step.step_id}. Read all context_files first, then write t
     }
   }
 
+  runFilesWritten = [...allFilesWritten]
+
   if (executionFailed) {
     log("Execution halted due to missing context. Fix the context and re-run.")
+    runOutcome = "execution_failed"
     break
   }
 
@@ -131,6 +144,7 @@ Read each file, run the test suite if available, and return your verdict JSON.`
     verdict = JSON.parse(jsonMatch[0])
   } catch (e) {
     log(`ERROR: Reviewer did not return valid JSON. Raw output:\n${reviewText}`)
+    runOutcome = "review_parse_error"
     break
   }
 
@@ -140,6 +154,7 @@ Read each file, run the test suite if available, and return your verdict JSON.`
     if (verdict.suggestions && verdict.suggestions.length > 0) {
       log(`\nSuggestions (non-blocking):\n${verdict.suggestions.map(s => `  - ${s}`).join("\n")}`)
     }
+    runOutcome = verdict.verdict
     break
   }
 
@@ -151,17 +166,29 @@ Read each file, run the test suite if available, and return your verdict JSON.`
 
   if (!verdict.new_plan_needed) {
     log("Reviewer did not request replanning. Manual intervention required.")
+    runOutcome = "rejected_no_replan"
     break
   }
 
   retryCount++
+  runRetries = retryCount
   if (retryCount > MAX_RETRIES) {
     log(`Reached retry cap (${MAX_RETRIES}). Stopping. Review blocking issues above.`)
+    runOutcome = "retry_cap_reached"
     break
   }
 
   log(`\nReplanning (attempt ${retryCount + 1}) — notes: ${verdict.replanning_notes}`)
   currentTask = `${taskDescription}\n\nReplanning notes from previous attempt:\n${verdict.replanning_notes}`
 }
+
+// Flush one workflow-level metrics record via the ollama-local MCP tool.
+// Uses Haiku (cheap, fast) and silently no-ops if the MCP server is unavailable.
+const taskPreview = String(taskDescription).slice(0, 80).replace(/["'`\\]/g, " ").replace(/\s+/g, " ").trim()
+const metaJson = `{"task":"${taskPreview}","steps_planned":${runStepsPlanned},"files_written":${runFilesWritten.length},"retries":${runRetries}}`
+await agent(
+  `Use the ollama-local MCP tool log_event now. Pass these exact argument values:\n- phase: "workflow"\n- model: "opus+haiku+sonnet"\n- outcome: "${runOutcome}"\n- metadata_json: '${metaJson}'`,
+  { label: "metrics:workflow", model: "haiku" }
+)
 
 return { done: true }

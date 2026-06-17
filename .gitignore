@@ -16,6 +16,9 @@ node_modules/
 # macOS
 .DS_Store
 
+# Metrics log — append-only at runtime, not for version control
+metrics.jsonl
+
 # Environment
 .env
 *.env

@@ -151,6 +151,67 @@ Runs the full workflow on a safe, self-contained task (CSV parser + tests).
 
 ---
 
+## Metrics
+
+The workflow records two kinds of events automatically to `metrics.jsonl` in
+the project root (gitignored, append-only JSONL):
+
+| Event | Source | What's captured |
+|-------|--------|-----------------|
+| `ollama_call` | Python MCP server | model, latency (ms), prompt/response size, outcome |
+| `workflow` | Workflow JS via `log_event` | task preview, steps planned, files written, retries, verdict |
+
+Each record: `{"ts": <unix float>, "phase": "...", "model": "...", "outcome": "...", "meta": {...}}`
+
+### View a summary
+
+```bash
+./scripts/show_metrics.sh
+```
+
+Or ask Claude directly:
+
+```
+Use the ollama-local get_metrics_summary tool.
+```
+
+### Sample output
+
+```
+=== Workflow Runs ===
+Total:    4
+Outcomes: approved=3  approved_with_notes=1
+Avg retries per run: 0.3
+
+Recent runs (newest first):
+  2026-06-17 09:41 UTC  approved                steps=3 files=3 retries=0
+    task: Add rate-limiting middleware to the /api/v2 routes
+  2026-06-17 08:15 UTC  approved_with_notes     steps=4 files=4 retries=1
+    task: Add pagination to the /users endpoint
+
+=== Ollama Calls ===
+Total: 18 calls
+
+  Model                           Calls  Avg latency  Errors
+  ----------------------------------------------------------
+  devstral:latest                     3        14.1s       0
+  qwen2.5-coder:7b                   15         9.3s       0
+
+Approx tokens in:  48,000  (from 192,000 chars)
+Approx tokens out: 12,000  (from  48,000 chars)
+
+Note: Anthropic API calls (Opus/Sonnet/Haiku) are not tracked here.
+Use the Claude Console for cost reporting on those tiers.
+```
+
+**What the metrics tell you:**
+- `steps_planned` vs `files_written` — if files < steps, some steps wrote nothing (check worker output)
+- `retries` > 0 — task descriptions that caused reviewer rejection; tighten the description or CLAUDE.md
+- Ollama `avg latency` — if consistently > 30s, try a smaller quantization or model size
+- Ollama `Errors` > 0 — Ollama went offline mid-run; check `ollama serve`
+
+---
+
 ## Model selection with llm-checker
 
 `llm-checker` is registered as a second MCP server by the setup script. It

@@ -3,10 +3,17 @@ Ollama MCP Server — exposes a local Ollama instance as Claude Code MCP tools.
 Fails gracefully when Ollama is offline so the Worker can fall back to Haiku.
 """
 
+import json
 import os
+import sys
+import time
 
 import httpx
 from fastmcp import FastMCP
+
+# Allow importing the sibling metrics module regardless of working directory.
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import metrics as _metrics
 
 OLLAMA_BASE = os.environ.get("OLLAMA_BASE_URL", "http://localhost:11434")
 # Developer-overridable default model. Set OLLAMA_DEFAULT_MODEL in your shell or
@@ -25,6 +32,13 @@ MODEL_GUIDANCE = [
 ]
 
 mcp = FastMCP("ollama-local")
+
+
+def _append_metric(record: dict) -> None:
+    try:
+        _metrics.append(record)
+    except Exception:
+        pass  # Never let metrics writes crash a tool call
 
 
 @mcp.tool()
@@ -111,6 +125,8 @@ def ask_local_model(model: str, prompt: str, system: str = "") -> str:
     }
     if system:
         payload["system"] = system
+    t0 = time.time()
+    result = ""
     try:
         response = httpx.post(
             f"{OLLAMA_BASE}/api/generate",
@@ -118,13 +134,28 @@ def ask_local_model(model: str, prompt: str, system: str = "") -> str:
             timeout=TIMEOUT,
         )
         response.raise_for_status()
-        return response.json().get("response", "")
+        result = response.json().get("response", "")
+        return result
     except httpx.ConnectError:
-        return "ERROR: Ollama is not running. Start it with `ollama serve` and retry."
+        result = "ERROR: Ollama is not running. Start it with `ollama serve` and retry."
+        return result
     except httpx.TimeoutException:
-        return f"ERROR: Request timed out after {TIMEOUT}s. The model may need more time or resources."
+        result = f"ERROR: Request timed out after {TIMEOUT}s. The model may need more time or resources."
+        return result
     except Exception as e:
-        return f"ERROR: {e}"
+        result = f"ERROR: {e}"
+        return result
+    finally:
+        _append_metric({
+            "phase": "ollama_call",
+            "model": model,
+            "outcome": "error" if result.startswith("ERROR") else "success",
+            "meta": {
+                "prompt_chars": len(prompt),
+                "response_chars": len(result),
+                "duration_ms": int((time.time() - t0) * 1000),
+            },
+        })
 
 
 @mcp.tool()
@@ -144,7 +175,6 @@ def ask_local_model_for_code(
         context: Existing file content or surrounding code to consider.
         language: Target programming language (optional but recommended).
     """
-    # Prefer devstral when available for code tasks
     available = list_local_models()
     model = DEFAULT_MODEL
     if not any("ERROR" in m for m in available):
@@ -167,6 +197,40 @@ def ask_local_model_for_code(
         full_prompt = f"Context (existing code):\n{context}\n\nTask:\n{prompt}"
 
     return ask_local_model(model=model, prompt=full_prompt, system=system)
+
+
+@mcp.tool()
+def log_event(phase: str, model: str, outcome: str, metadata_json: str = "{}") -> str:
+    """
+    Record a workflow-level event to the metrics log (metrics.jsonl).
+
+    Called automatically by the dev-task-workflow at the end of each run.
+    Can also be called manually to annotate runs or record custom events.
+
+    Args:
+        phase: e.g. "workflow", "plan", "execute", "review"
+        model: model name or tier combo (e.g. "opus+haiku+sonnet")
+        outcome: e.g. "approved", "rejected", "high_risk", "execution_failed"
+        metadata_json: JSON string with extra fields (task, steps, retries, etc.)
+    """
+    record: dict = {"phase": phase, "model": model, "outcome": outcome}
+    try:
+        record["meta"] = json.loads(metadata_json)
+    except Exception:
+        record["meta"] = {"raw": metadata_json}
+    _append_metric(record)
+    return f"Logged: phase={phase} model={model} outcome={outcome}"
+
+
+@mcp.tool()
+def get_metrics_summary() -> str:
+    """
+    Return a human-readable summary of all recorded metrics from metrics.jsonl.
+
+    Shows workflow run outcomes and counts, Ollama call counts and average
+    latency by model, and estimated token usage for local calls.
+    """
+    return _metrics.summarize()
 
 
 if __name__ == "__main__":
