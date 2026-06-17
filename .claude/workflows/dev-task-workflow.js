@@ -1,0 +1,167 @@
+export const meta = {
+  name: "dev-task-workflow",
+  description: "Three-phase Planner → Worker → Reviewer workflow for cost-optimised coding tasks",
+  phases: [
+    { title: "Plan", detail: "Opus planner decomposes the task into a JSON execution plan" },
+    { title: "Execute", detail: "Haiku worker executes each step sequentially" },
+    { title: "Review", detail: "Sonnet reviewer verifies correctness and style" },
+  ],
+}
+
+// args: { task: string } — the natural-language task description
+const taskDescription = (args && args.task) ? args.task : args
+
+const MAX_RETRIES = 2
+let retryCount = 0
+let currentTask = taskDescription
+
+while (retryCount <= MAX_RETRIES) {
+  // ─── Phase 1: Plan ───────────────────────────────────────────────────────
+
+  phase("Plan")
+  log(`Planning task (attempt ${retryCount + 1}/${MAX_RETRIES + 1}): ${currentTask}`)
+
+  const planText = await agent(
+    `You are the planner agent. Decompose this development task into a JSON execution plan.\n\nTask: ${currentTask}`,
+    { label: "planner", phase: "Plan", agentType: "planner" }
+  )
+
+  let plan
+  try {
+    const jsonMatch = planText.match(/\{[\s\S]*\}/)
+    if (!jsonMatch) throw new Error("No JSON found in planner output")
+    plan = JSON.parse(jsonMatch[0])
+  } catch (e) {
+    log(`ERROR: Planner did not return valid JSON. Raw output:\n${planText}`)
+    break
+  }
+
+  log(`Plan ready — ${plan.steps.length} step(s), risk: ${plan.risk_level}`)
+
+  if (plan.risk_level === "high") {
+    log(
+      `HIGH RISK PLAN — please review before proceeding:\n${JSON.stringify(plan, null, 2)}\n\nRe-invoke the workflow with user approval to continue.`
+    )
+    // Halt and let the user decide; do not auto-proceed on high-risk plans.
+    break
+  }
+
+  // ─── Phase 2: Execute ────────────────────────────────────────────────────
+
+  phase("Execute")
+  const allFilesWritten = []
+  let executionFailed = false
+
+  for (const step of plan.steps) {
+    log(`Executing step ${step.step_id}/${plan.steps.length}: ${step.action} → ${step.target_file}`)
+
+    const workerPrompt = `You are the worker agent. Execute step ${step.step_id} from the plan below.
+
+Plan JSON:
+${JSON.stringify(plan, null, 2)}
+
+Execute ONLY step_id ${step.step_id}. Read all context_files first, then write the target file.`
+
+    const workerOutput = await agent(workerPrompt, {
+      label: `worker:step-${step.step_id}`,
+      phase: "Execute",
+      agentType: "worker",
+    })
+
+    // Check for error JSON
+    const errorMatch = workerOutput.match(/\{"error"\s*:/)
+    if (errorMatch) {
+      let errorObj
+      try {
+        const errorJson = workerOutput.match(/\{[\s\S]*\}/)
+        errorObj = errorJson ? JSON.parse(errorJson[0]) : { error: "unknown", needed: workerOutput }
+      } catch {
+        errorObj = { error: "parse_error", needed: workerOutput }
+      }
+      log(`Worker stopped at step ${step.step_id}: missing context — ${errorObj.needed}`)
+      executionFailed = true
+      break
+    }
+
+    // Parse completion JSON
+    const completionMatch = workerOutput.match(/\{[\s\S]*"status"\s*:\s*"complete"[\s\S]*\}/)
+    if (completionMatch) {
+      try {
+        const completion = JSON.parse(completionMatch[0])
+        allFilesWritten.push(...(completion.files_written || []))
+        log(`Step ${step.step_id} complete — wrote: ${(completion.files_written || []).join(", ")}`)
+      } catch {
+        log(`Step ${step.step_id}: could not parse completion JSON, continuing`)
+      }
+    } else {
+      log(`Step ${step.step_id}: worker finished (no structured completion JSON)`)
+    }
+  }
+
+  if (executionFailed) {
+    log("Execution halted due to missing context. Fix the context and re-run.")
+    break
+  }
+
+  // ─── Phase 3: Review ─────────────────────────────────────────────────────
+
+  phase("Review")
+  log(`Reviewing ${allFilesWritten.length} file(s): ${allFilesWritten.join(", ")}`)
+
+  const reviewerPrompt = `You are the reviewer agent. Review the files written by the Worker against the plan below.
+
+Original Plan JSON:
+${JSON.stringify(plan, null, 2)}
+
+Files written by Worker:
+${allFilesWritten.join("\n")}
+
+Read each file, run the test suite if available, and return your verdict JSON.`
+
+  const reviewText = await agent(reviewerPrompt, {
+    label: "reviewer",
+    phase: "Review",
+    agentType: "reviewer",
+  })
+
+  let verdict
+  try {
+    const jsonMatch = reviewText.match(/\{[\s\S]*\}/)
+    if (!jsonMatch) throw new Error("No JSON found in reviewer output")
+    verdict = JSON.parse(jsonMatch[0])
+  } catch (e) {
+    log(`ERROR: Reviewer did not return valid JSON. Raw output:\n${reviewText}`)
+    break
+  }
+
+  if (verdict.verdict === "approved" || verdict.verdict === "approved_with_notes") {
+    log(`\n✓ APPROVED (${verdict.verdict})`)
+    log(`Files built:\n${allFilesWritten.map(f => `  • ${f}`).join("\n")}`)
+    if (verdict.suggestions && verdict.suggestions.length > 0) {
+      log(`\nSuggestions (non-blocking):\n${verdict.suggestions.map(s => `  - ${s}`).join("\n")}`)
+    }
+    break
+  }
+
+  // Rejected
+  log(`\n✗ REJECTED`)
+  if (verdict.blocking_issues && verdict.blocking_issues.length > 0) {
+    log(`Blocking issues:\n${verdict.blocking_issues.map(i => `  • ${i}`).join("\n")}`)
+  }
+
+  if (!verdict.new_plan_needed) {
+    log("Reviewer did not request replanning. Manual intervention required.")
+    break
+  }
+
+  retryCount++
+  if (retryCount > MAX_RETRIES) {
+    log(`Reached retry cap (${MAX_RETRIES}). Stopping. Review blocking issues above.`)
+    break
+  }
+
+  log(`\nReplanning (attempt ${retryCount + 1}) — notes: ${verdict.replanning_notes}`)
+  currentTask = `${taskDescription}\n\nReplanning notes from previous attempt:\n${verdict.replanning_notes}`
+}
+
+return { done: true }

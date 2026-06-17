@@ -1,0 +1,383 @@
+# Planner-Worker-Reviewer
+
+A three-agent Claude Code workflow that routes bulk implementation work to cheap
+models (Haiku / local Ollama) while reserving Opus for planning and Sonnet for
+review. Drop it into any codebase; it is framework and language agnostic.
+
+---
+
+## Architecture
+
+```
+User task description
+        │
+        ▼
+┌───────────────┐   JSON plan    ┌───────────────┐   files_written   ┌───────────────┐
+│   Planner     │ ─────────────► │    Worker      │ ─────────────────► │   Reviewer    │
+│  (Opus 4.8)   │               │  (Haiku 4.5)   │                   │ (Sonnet 4.6)  │
+└───────────────┘               └───────────────┘                   └───────────────┘
+                                       │                                      │
+                                 (optional)                            verdict JSON
+                                       │
+                                       ▼
+                              ┌─────────────────┐
+                              │  Ollama MCP      │
+                              │ (local, free)    │
+                              └─────────────────┘
+```
+
+---
+
+## Cost model
+
+| Phase   | Agent    | Model (alias) | Why                                              |
+|---------|----------|---------------|--------------------------------------------------|
+| Plan    | Planner  | `opus`        | Ambiguous inputs, cross-file reasoning           |
+| Execute | Worker   | `haiku`       | Deterministic, instruction-following, high volume|
+| Execute | Worker   | Ollama (opt.) | On-prem / long-running / cost-free generation    |
+| Review  | Reviewer | `sonnet`      | Quality bar without Opus cost                    |
+
+The agent `model:` frontmatter uses **tier aliases** (`opus`, `sonnet`, `haiku`)
+rather than pinned version IDs. Aliases always resolve to the latest model in
+that tier, so the prototype keeps working as Anthropic ships new versions — no
+edits needed. If you need to pin a specific version for reproducibility, replace
+the alias with an exact ID (e.g. `claude-opus-4-8`) in the agent's frontmatter.
+
+Never route planning or review to Haiku — the JSON contracts require reasoning
+about trade-offs that Haiku handles poorly under ambiguous specs.
+
+---
+
+## Prerequisites
+
+- **Claude Code** installed and authenticated (`claude --version`)
+- **Python 3.10+** (for the Ollama MCP server)
+- **Node.js 16+** (for llm-checker model recommendations — `node --version`)
+- **Ollama** (optional, for local model offload)
+
+---
+
+## Setup
+
+```bash
+# 1. Make scripts executable
+chmod +x scripts/setup_mcp.sh scripts/demo_task.sh
+
+# 2. Install MCP dependencies and register both MCP servers
+#    (requires Python 3.10+ and Node.js 16+)
+./scripts/setup_mcp.sh
+
+# 3. (If using Ollama) start Ollama, then find and pull the right model:
+ollama serve &
+# Ask Claude: "Use the llm-checker recommend tool with category: coding."
+# Ask Claude: "Use the llm-checker ollama_pull tool with model: <recommended>"
+# See "Model selection with llm-checker" below for the full workflow.
+
+# 4. Restart Claude Code to pick up the new MCP servers
+
+# 5. Edit CLAUDE.md — fill in Project, Tech stack, and Project structure
+```
+
+---
+
+## Usage
+
+### Full three-phase workflow (recommended)
+
+```
+Use the dev-task-workflow with task: Add a rate-limiting middleware to the
+/api/v2 routes that caps requests at 100/minute per IP.
+```
+
+The workflow:
+1. Planner produces a JSON plan and pauses for user confirmation if `risk_level`
+   is `"high"`
+2. Worker executes each step in order, writing files
+3. Reviewer checks the result; if rejected with `new_plan_needed: true`, the
+   workflow replans and retries (capped at 2 retries)
+
+### Individual agents (simpler tasks)
+
+When you already know exactly what you want, invoke agents directly:
+
+```
+# Just plan — inspect the plan before committing
+Use the planner agent: Add pagination to the /users endpoint.
+
+# Just write a specific file
+Use the worker agent with this plan JSON and step_id 2: [paste plan JSON]
+
+# Just review a diff
+Use the reviewer agent with this plan JSON and these files: [list files]
+```
+
+### Ollama MCP tool (local / on-prem generation)
+
+The Worker can delegate generation to your local Ollama instance:
+
+```
+Use the ollama-local MCP tool to generate a Go implementation of a
+binary search tree. Language: Go.
+```
+
+Available tools:
+- `recommend_model` — RAM-based fallback recommender (no Node.js required)
+- `list_local_models` — see what models are pulled locally
+- `ask_local_model(model, prompt, system)` — raw generation
+- `ask_local_model_for_code(prompt, context, language)` — code-optimised wrapper
+
+**Choosing and configuring the local model.** The Worker's local model is *not*
+hardcoded — set it once via an environment variable and the server picks it up:
+
+| Variable               | Default               | Purpose                                  |
+|------------------------|-----------------------|------------------------------------------|
+| `OLLAMA_DEFAULT_MODEL` | `qwen2.5-coder:32b`   | Model used when none is passed explicitly |
+| `OLLAMA_BASE_URL`      | `http://localhost:11434` | Ollama endpoint                       |
+| `OLLAMA_TIMEOUT`       | `120`                 | Generation timeout (seconds)             |
+
+For a more accurate recommendation that accounts for GPU VRAM, quantization,
+and a catalog of 229+ models, use the `llm-checker` MCP server instead
+(see **Model selection with llm-checker** below).
+
+---
+
+## Demo
+
+```bash
+./scripts/demo_task.sh
+```
+
+Runs the full workflow on a safe, self-contained task (CSV parser + tests).
+
+---
+
+## Model selection with llm-checker
+
+`llm-checker` is registered as a second MCP server by the setup script. It
+inspects your CPU, GPU, RAM, and acceleration backend (Metal/CUDA/ROCm/CPU),
+then scores 229+ Ollama models against your actual hardware — far more accurate
+than a RAM-only heuristic because it accounts for GPU VRAM, quantization levels,
+and model-family quality.
+
+### Step-by-step: find, pull, and configure the best model
+
+**1. Detect your hardware**
+
+```
+Use the llm-checker hw_detect tool.
+```
+
+Returns CPU, GPU inventory, total RAM, memory bandwidth, and acceleration backend.
+Run this once so you know what you're working with.
+
+**2. Get a coding-optimised recommendation**
+
+```
+Use the llm-checker recommend tool with category: coding.
+```
+
+Returns a ranked list of models your hardware can run today, with estimated
+memory usage, tokens/sec, and a quality score. Pick the top-ranked model name.
+
+**3. Check what's already installed**
+
+```
+Use the llm-checker ollama_list tool.
+```
+
+If the recommended model is already present, skip to step 5.
+
+**4. Pull the recommended model**
+
+```
+Use the llm-checker ollama_pull tool with model: qwen2.5-coder:7b.
+```
+
+Or from the terminal directly:
+
+```bash
+ollama pull qwen2.5-coder:7b
+```
+
+**5. Set the model as the Worker's default**
+
+```bash
+export OLLAMA_DEFAULT_MODEL=qwen2.5-coder:7b
+# Persist it:
+echo 'export OLLAMA_DEFAULT_MODEL=qwen2.5-coder:7b' >> ~/.zshrc
+```
+
+### Keeping models up to date
+
+New Ollama model versions are published frequently. Run this periodically:
+
+**Sync the catalog** (refreshes the local 229-model SQLite database from Ollama's
+live registry — discovers newly published models and updated quantizations):
+
+```
+Use the llm-checker sync tool.
+```
+
+**Re-check your recommendation** after syncing — a new model may score higher:
+
+```
+Use the llm-checker recommend tool with category: coding.
+```
+
+**Pull the update** (Ollama always updates `latest` tags in-place):
+
+```bash
+ollama pull qwen2.5-coder:7b
+```
+
+Update `OLLAMA_DEFAULT_MODEL` if you switch to a different model.
+
+### Other useful llm-checker tools
+
+| Tool | What it does |
+|------|-------------|
+| `hw_detect` | Full hardware report: CPU, GPU, RAM, acceleration |
+| `recommend` | Ranked model list by category (`coding`, `reasoning`, `general`, `multimodal`) |
+| `check` | Full compatibility report against all 229 models |
+| `installed` | List locally installed models ranked by hardware fit |
+| `ollama_list` | Show pulled models with sizes |
+| `ollama_pull` | Download a model |
+| `ollama_run` | Run a prompt against a local model with token/sec metrics |
+| `ollama_remove` | Delete a model |
+| `sync` | Refresh model catalog from Ollama registry |
+| `benchmark` | Speed and efficiency test across models |
+| `compare_models` | Head-to-head comparison of two models on your hardware |
+| `gpu_plan` | Multi-GPU placement advice |
+| `smart_recommend` | Best single model for a one-line task description |
+
+---
+
+## JSON contracts
+
+All inter-agent communication is structured JSON. Keep these schemas stable.
+
+### Planner output — Execution Plan
+
+```json
+{
+  "task_summary": "one sentence describing the task and any assumptions",
+  "risk_level": "low|medium|high",
+  "steps": [
+    {
+      "step_id": 1,
+      "action": "create_file|modify_file|write_test|refactor",
+      "target_file": "path/to/file",
+      "instruction": "precise instruction for the Worker",
+      "context_files": ["files the Worker must read first"],
+      "validation": "what a correct output looks like"
+    }
+  ],
+  "review_criteria": [
+    "human-readable criterion the Reviewer checks"
+  ]
+}
+```
+
+### Worker completion signal
+
+```json
+{"step_id": 1, "status": "complete", "files_written": ["path/to/file"]}
+```
+
+### Worker error signal
+
+```json
+{"error": "missing_context", "needed": "description of what is missing"}
+```
+
+### Reviewer verdict
+
+```json
+{
+  "verdict": "approved|rejected|approved_with_notes",
+  "criteria_results": [
+    {
+      "criterion": "text from review_criteria",
+      "result": "pass|fail|warning",
+      "note": "explanation if fail or warning"
+    }
+  ],
+  "blocking_issues": ["must-fix items"],
+  "suggestions": ["non-blocking improvements"],
+  "new_plan_needed": true,
+  "replanning_notes": "what the Planner must change (only when new_plan_needed is true)"
+}
+```
+
+---
+
+## Customising CLAUDE.md
+
+Open [`CLAUDE.md`](CLAUDE.md) and replace every `<placeholder>` section:
+
+1. **Project** — one sentence about what this codebase does
+2. **Tech stack** — languages, frameworks, key libraries
+3. **Project structure** — a short directory map (see the comment template)
+
+CLAUDE.md is auto-loaded into every Claude Code session. Good context here
+reduces planner mistakes and worker style drift.
+
+---
+
+## Troubleshooting
+
+### Ollama is not running
+
+```
+ERROR: Ollama is not running. Start it with `ollama serve`.
+```
+
+Run `ollama serve` in a terminal (or configure it as a system service). The
+Worker will fall back to Haiku automatically; the Ollama tools just return
+error strings rather than raising exceptions.
+
+### MCP server not connecting
+
+1. Check it was registered: `claude mcp list`
+2. If missing, re-run `./scripts/setup_mcp.sh`
+3. Restart Claude Code after registering
+
+### Reviewer rejects in a loop
+
+The workflow caps retries at 2. If it still fails:
+1. Read the `blocking_issues` and `replanning_notes` printed to stdout
+2. Fix the underlying ambiguity in your task description or in CLAUDE.md
+3. Re-run: `Use the dev-task-workflow with task: [revised description]`
+
+If the reviewer is overly strict for your project, edit
+`.claude/agents/reviewer.md` and loosen the blocking criteria.
+
+### Worker outputs markdown fences instead of raw file content
+
+The worker prompt explicitly instructs it not to do this. If a model ignores
+the instruction, add this line to `.claude/agents/worker.md`:
+```
+CRITICAL: Never wrap file output in markdown code fences (``` or ~~~).
+```
+
+### High-risk plan halts the workflow
+
+The workflow deliberately stops and prints the plan when `risk_level` is
+`"high"`. Review the plan, make any edits to the task description if needed,
+then re-invoke to proceed.
+
+### llm-checker MCP not connecting
+
+1. Verify Node.js 16+ is installed: `node --version`
+2. Verify llm-checker is installed globally: `npm list -g llm-checker`
+3. If missing, install it: `npm install -g llm-checker`
+4. Find the MCP server path: `echo "$(npm root -g)/llm-checker/bin/mcp-server.mjs"`
+5. Re-register manually:
+   ```bash
+   claude mcp add "llm-checker" --transport stdio -- \
+     node "$(npm root -g)/llm-checker/bin/mcp-server.mjs"
+   ```
+6. Restart Claude Code.
+
+If Node.js is not available, use the `ollama-local recommend_model` tool as a
+fallback — it works without Node.js using RAM-based heuristics.

@@ -1,0 +1,21 @@
+# Claude Code local settings (machine-specific paths)
+.claude/settings.local.json
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+dist/
+build/
+
+# Node
+node_modules/
+
+# macOS
+.DS_Store
+
+# Environment
+.env
+*.env
