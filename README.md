@@ -123,7 +123,7 @@ User task description
 | Phase              | Agent    | Model            | When                                                        |
 |--------------------|----------|------------------|-------------------------------------------------------------|
 | Plan               | Planner  | `opus`           | Always — ambiguous inputs, cross-file reasoning             |
-| Plan (strengthen)  | Planner  | `claude-fable-5` | When Opus plan confidence < 7/10 — refine and fill gaps     |
+| Plan (strengthen)  | Planner  | `fable`          | When Opus plan confidence < 7/10 — refine and fill gaps     |
 | Plan (self-check)  | Planner  | `opus`           | When Fable unavailable and plan confidence < 7/10           |
 | Execute (probe)    | —        | `haiku`          | Once per run — checks if Ollama is running and picks model  |
 | Execute (generate) | —        | Ollama (auto)    | Per step when Ollama available — pre-generates code via MCP |

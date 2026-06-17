@@ -73,7 +73,7 @@ Task: ${currentTask}`
     let strengthenedText = await agent(strengthenPrompt, {
       label: "planner:fable",
       phase: "Plan",
-      model: "claude-fable-5",
+      model: "fable",
     })
 
     if (!strengthenedText) {
