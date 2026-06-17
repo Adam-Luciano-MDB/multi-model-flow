@@ -164,25 +164,28 @@ def ask_local_model_for_code(
     prompt: str,
     context: str = "",
     language: str = "",
+    model: str = "",
 ) -> str:
     """
     Convenience wrapper for code generation via the local Ollama model.
 
-    Automatically selects qwen2.5-coder:32b (falls back to devstral if
-    available) and applies a code-focused system prompt.
+    Automatically selects the best available model (devstral if installed,
+    otherwise DEFAULT_MODEL). Pass `model` to override the selection.
 
     Args:
         prompt: What to implement or fix.
         context: Existing file content or surrounding code to consider.
         language: Target programming language (optional but recommended).
+        model: Override model name. When empty, auto-selects from installed models.
     """
-    available = list_local_models()
-    model = DEFAULT_MODEL
-    if not any("ERROR" in m for m in available):
-        for m in available:
-            if "devstral" in m.lower():
-                model = m
-                break
+    if not model:
+        available = list_local_models()
+        model = DEFAULT_MODEL
+        if not any("ERROR" in m for m in available):
+            for m in available:
+                if "devstral" in m.lower():
+                    model = m
+                    break
 
     lang_hint = f" in {language}" if language else ""
     system = (

@@ -27,6 +27,31 @@ let runStepsPlanned = 0
 let runFilesWritten = []
 let runRetries = 0
 
+// Infer language from file extension for the Ollama code prompt.
+const EXT_LANG = { py: "Python", ts: "TypeScript", tsx: "TypeScript", js: "JavaScript",
+  jsx: "JavaScript", go: "Go", rs: "Rust", java: "Java", rb: "Ruby", sh: "Bash",
+  sql: "SQL", html: "HTML", css: "CSS" }
+
+// Probe for Ollama once before the retry loop — availability doesn't change between retries.
+let ollamaModel = null
+if (pinnedOllamaModel) {
+  ollamaModel = pinnedOllamaModel
+  log(`Ollama model pinned by caller — using ${ollamaModel}`)
+} else {
+  const probeText = await agent(
+    "Call the ollama-local recommend_model tool. Return ONLY the recommended model name (e.g. 'qwen2.5-coder:7b') from its output, or the single word \"none\" if the output says the model is not installed or Ollama is unavailable.",
+    { label: "ollama:probe", phase: "Execute", model: "haiku" }
+  )
+  if (probeText) {
+    const firstLine = probeText.trim().split("\n")[0].replace(/^[\s•\-*\d.]+/, "").trim()
+    if (firstLine && !/error/i.test(firstLine) && firstLine.toLowerCase() !== "none") {
+      ollamaModel = firstLine
+      log(`Ollama auto-detected — ${ollamaModel} will assist with code generation`)
+    }
+  }
+  if (!ollamaModel) log("Ollama not available — Worker will use Haiku for all generation")
+}
+
 while (retryCount <= MAX_RETRIES) {
   // ─── Phase 1: Plan ───────────────────────────────────────────────────────
 
@@ -116,36 +141,8 @@ Task: ${currentTask}`
 
   phase("Execute")
 
-  // Determine the Ollama model to use for code pre-generation.
-  // If the caller pinned a model (ollamaModel arg), use it directly and skip
-  // the probe. Otherwise auto-detect by calling list_local_models.
-  // Falls back to Haiku-only if Ollama is offline or has no models pulled.
-  let ollamaModel = null
-  if (pinnedOllamaModel) {
-    ollamaModel = pinnedOllamaModel
-    log(`Ollama model pinned by caller — using ${ollamaModel}`)
-  } else {
-    const probeText = await agent(
-      "Call the ollama-local list_local_models tool. Return ONLY the first model name from the list, or the single word \"none\" if the list is empty or Ollama is not running.",
-      { label: "ollama:probe", phase: "Execute", model: "haiku" }
-    )
-    if (probeText) {
-      const firstLine = probeText.trim().split("\n")[0].replace(/^[\s•\-*]+/, "").trim()
-      if (firstLine && !firstLine.startsWith("ERROR") && firstLine.toLowerCase() !== "none") {
-        ollamaModel = firstLine
-        log(`Ollama auto-detected — ${ollamaModel} will assist with code generation`)
-      }
-    }
-    if (!ollamaModel) log("Ollama not available — Worker will use Haiku for all generation")
-  }
-
   const allFilesWritten = []
   let executionFailed = false
-
-  // Infer language from file extension for the Ollama code prompt.
-  const EXT_LANG = { py: "Python", ts: "TypeScript", tsx: "TypeScript", js: "JavaScript",
-    jsx: "JavaScript", go: "Go", rs: "Rust", java: "Java", rb: "Ruby", sh: "Bash",
-    sql: "SQL", html: "HTML", css: "CSS" }
 
   for (const step of plan.steps) {
     log(`Executing step ${step.step_id}/${plan.steps.length}: ${step.action} → ${step.target_file}`)
@@ -155,14 +152,16 @@ Task: ${currentTask}`
     // files, adapts style, and writes the final file.
     let ollamaContext = ""
     if (ollamaModel) {
-      const ext = (step.target_file.split(".").pop() || "").toLowerCase()
-      const language = EXT_LANG[ext] || ext || "code"
+      const _fname = (step.target_file.split("/").pop() || step.target_file)
+      const _dot = _fname.lastIndexOf(".")
+      const ext = _dot > 0 ? _fname.slice(_dot + 1).toLowerCase() : ""
+      const language = EXT_LANG[ext] || (ext ? ext : "code")
       const contextHint = (step.context_files || []).join(", ") || "none"
       const ollamaText = await agent(
         `Use the ollama-local ask_local_model_for_code tool with these arguments:\n- prompt: "${step.instruction.replace(/"/g, "'")}"\n- context: "Context files to be aware of: ${contextHint}"\n- language: "${language}"\n- model: "${ollamaModel}"\nReturn only the raw output from the tool.`,
         { label: `ollama:step-${step.step_id}`, phase: "Execute", model: "haiku" }
       )
-      if (ollamaText && !ollamaText.startsWith("ERROR")) {
+      if (ollamaText && !/^error/i.test(ollamaText)) {
         ollamaContext = `\n\nOllama (${ollamaModel}) has pre-generated an implementation for this step. Use it as your starting point — adapt imports, style, and conventions to match the existing codebase:\n\n${ollamaText}`
       }
     }
@@ -308,7 +307,7 @@ Read each file, run the test suite if available, and return your verdict JSON.`
 // Uses Haiku (cheap, fast) and silently no-ops if the MCP server is unavailable.
 const taskPreview = String(taskDescription).slice(0, 80).replace(/["'`\\]/g, " ").replace(/\s+/g, " ").trim()
 const modelsUsed = ollamaModel ? `opus+${ollamaModel}+haiku+sonnet` : "opus+haiku+sonnet"
-const metaJson = `{"task":"${taskPreview}","steps_planned":${runStepsPlanned},"files_written":${runFilesWritten.length},"retries":${runRetries},"ollama_model":"${ollamaModel || ""}"}`
+const metaJson = JSON.stringify({ task: taskPreview, steps_planned: runStepsPlanned, files_written: runFilesWritten.length, retries: runRetries, ollama_model: ollamaModel || "" })
 await agent(
   `Use the ollama-local MCP tool log_event now. Pass these exact argument values:\n- phase: "workflow"\n- model: "${modelsUsed}"\n- outcome: "${runOutcome}"\n- metadata_json: '${metaJson}'`,
   { label: "metrics:workflow", model: "haiku" }

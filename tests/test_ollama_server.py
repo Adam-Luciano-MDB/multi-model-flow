@@ -178,6 +178,17 @@ class TestAskLocalModelForCode:
         payload = mock_post.call_args.kwargs["json"]
         assert "Go" in payload["system"]
 
+    def test_respects_explicit_model_argument(self):
+        mock_resp = MagicMock()
+        mock_resp.json.return_value = {"response": "ok"}
+        with patch("httpx.get") as mock_get:
+            with patch("httpx.post", return_value=mock_resp) as mock_post:
+                with patch.object(_metrics_mod, "append"):
+                    server.ask_local_model_for_code("prompt", model="custom:model")
+        payload = mock_post.call_args.kwargs["json"]
+        assert payload["model"] == "custom:model"
+        mock_get.assert_not_called()  # list_local_models should be skipped
+
     def test_returns_error_string_when_ollama_offline(self):
         with patch("httpx.get", side_effect=Exception("offline")):
             with patch("httpx.post", side_effect=httpx.ConnectError("refused")):
