@@ -3,14 +3,18 @@
 [![tests](https://github.com/Adam-Luciano-MDB/multi-model-flow/actions/workflows/test.yml/badge.svg)](https://github.com/Adam-Luciano-MDB/multi-model-flow/actions/workflows/test.yml)
 
 A three-agent Claude Code workflow that routes bulk implementation work to cheap
-models (Haiku / local Ollama) while reserving Opus for planning and high-stakes
-review. Both the plan and the review carry confidence scores:
+models while reserving Opus for planning and high-stakes review. Ollama is
+used automatically when available — no configuration required.
 
-- **Plan (Opus)** — if confidence < 7/10, Fable refines the plan (or Opus
-  self-validates if Fable is unavailable). The workflow never halts; it warns
-  you and continues with the best available plan.
-- **Review (Sonnet)** — if confidence < 8/10, Opus is called for an independent
-  second opinion before the verdict is accepted.
+- **Ollama auto-detect** — at the start of every Execute phase the workflow
+  probes Ollama. If a local model is running, it pre-generates code for each
+  step; the Haiku Worker adapts and writes the final file. Falls back to
+  Haiku-only when Ollama is offline.
+- **Plan confidence** — if Opus scores its own plan below 7/10, Fable refines
+  it (or Opus self-validates if Fable is unavailable). Never halts; warns and
+  continues.
+- **Review confidence** — if Sonnet scores below 8/10, Opus gives an
+  independent second opinion before the verdict is accepted.
 
 Drop it into any codebase; it is framework and language agnostic.
 
@@ -32,9 +36,9 @@ In Claude Code, type:
 /dev-task-workflow Create a CSV parser utility with unit tests.
 ```
 
-You'll watch Opus plan (Fable/Opus validates if plan confidence < 7) → Haiku
-build → Sonnet review (escalates to Opus if review confidence < 8). When it
-finishes, see what ran and how long it took:
+You'll watch Opus plan → (Fable/Opus validates if plan confidence < 7) →
+auto-probe Ollama → Haiku build (Ollama assists if available) → Sonnet review
+(escalates to Opus if confidence < 8). When it finishes:
 
 ```bash
 ./scripts/show_metrics.sh
@@ -56,47 +60,76 @@ User task description
 └───────┬───────┘
         │ confidence score 1–10
         ▼
-┌───────────────────────┐
-│   confidence ≥ 7?     │
-└───────┬───────────────┘
-   no ▼                │ yes
-┌──────────────┐        │
-│ Fable refine │        │        ┌──────────────────┐  files_written  ┌───────────────────┐
-│ (or Opus     │        ├───────►│     Worker        │ ───────────────►│  Reviewer         │
-│  self-check) │        │        │  (haiku or ollama)│                 │  (sonnet)         │
-└──────┬───────┘        │        └────────┬─────────┘                 └─────────┬─────────┘
-       │  ⚠ warn user   │             (optional)                      confidence score 1–10
-       └────────────────┘                 │                                      │
-                                          ▼                           ┌──────────▼──────────┐
-                                 ┌────────────────┐                  │   confidence ≥ 8?   │
-                                 │   Ollama MCP   │                  └──────────┬──────────┘
-                                 │  (local, free) │               no ▼          │ yes
-                                 └────────────────┘        ┌───────────────┐    │
-                                                            │ Opus escalated│    │
-                                                            │    review     │    │
-                                                            └───────┬───────┘    │
-                                                                    └──────┬─────┘
-                                                                           │ verdict JSON
-                                                                           ▼
-                                                            ┌──────────────────────────┐
-                                                            │  metrics.jsonl           │
-                                                            │  + web dashboard :8765   │
-                                                            └──────────────────────────┘
+┌───────────────────┐
+│  confidence ≥ 7?  │
+└───────┬───────────┘
+   no ▼             │ yes
+┌──────────────┐    │
+│ Fable refine │    │
+│ (or Opus     │    │
+│  self-check) │    │
+└──────┬───────┘    │
+  ⚠ warn user       │
+       └────────────┤
+                    │ JSON plan
+                    ▼
+          ┌──────────────────────┐
+          │  Ollama probe        │  ← auto-detects once per run
+          │  (haiku calls MCP)   │
+          └──────────┬───────────┘
+          offline ▼  │ model found
+                     ▼
+        ┌────────────────────────────────────────┐
+        │  per step:                             │
+        │                                        │
+        │  [if Ollama] ollama:step-N (haiku)     │
+        │     → ask_local_model_for_code         │
+        │     → pre-generated code               │
+        │            │                           │
+        │            ▼                           │
+        │  worker:step-N (haiku)                 │
+        │     reads context + adapts code        │
+        │     writes file                        │
+        └──────────────┬─────────────────────────┘
+                       │ files_written
+                       ▼
+             ┌───────────────────┐
+             │  Reviewer         │
+             │  (sonnet)         │
+             └─────────┬─────────┘
+               confidence score 1–10
+                        │
+             ┌──────────▼──────────┐
+             │   confidence ≥ 8?   │
+             └──────────┬──────────┘
+          no ▼           │ yes
+  ┌───────────────┐      │
+  │ Opus escalated│      │
+  │    review     │      │
+  └───────┬───────┘      │
+          └───────┬───────┘
+                  │ verdict JSON
+                  ▼
+    ┌─────────────────────────┐
+    │  metrics.jsonl          │
+    │  + web dashboard :8765  │
+    └─────────────────────────┘
 ```
 
 ---
 
 ## Cost model
 
-| Phase             | Agent    | Model              | When                                                      |
-|-------------------|----------|--------------------|-----------------------------------------------------------|
-| Plan              | Planner  | `opus`             | Always — ambiguous inputs, cross-file reasoning           |
-| Plan (strengthen) | Planner  | `claude-fable-5`   | When Opus plan confidence < 7/10 — refine and fill gaps   |
-| Plan (self-check) | Planner  | `opus`             | When Fable unavailable and plan confidence < 7/10         |
-| Execute           | Worker   | `haiku`            | Default — deterministic, instruction-following, high volume|
-| Execute           | Worker   | Ollama (opt.)      | On-prem / long-running / cost-free generation             |
-| Review            | Reviewer | `sonnet`           | Always — quality bar without Opus cost                    |
-| Review (escalate) | Reviewer | `opus`             | When Sonnet confidence < 8/10 — independent second opinion|
+| Phase              | Agent    | Model            | When                                                        |
+|--------------------|----------|------------------|-------------------------------------------------------------|
+| Plan               | Planner  | `opus`           | Always — ambiguous inputs, cross-file reasoning             |
+| Plan (strengthen)  | Planner  | `claude-fable-5` | When Opus plan confidence < 7/10 — refine and fill gaps     |
+| Plan (self-check)  | Planner  | `opus`           | When Fable unavailable and plan confidence < 7/10           |
+| Execute (probe)    | —        | `haiku`          | Once per run — checks if Ollama is running and picks model  |
+| Execute (generate) | —        | Ollama (auto)    | Per step when Ollama available — pre-generates code via MCP |
+| Execute (write)    | Worker   | `haiku`          | Per step — adapts Ollama output, writes files, signals done |
+| Review             | Reviewer | `sonnet`         | Always — quality bar without Opus cost                      |
+| Review (escalate)  | Reviewer | `opus`           | When Sonnet confidence < 8/10 — independent second opinion  |
 
 The agent `model:` frontmatter uses **tier aliases** (`opus`, `sonnet`, `haiku`)
 rather than pinned version IDs. Aliases always resolve to the latest model in
@@ -249,33 +282,40 @@ Use the worker agent with this plan JSON and step_id 2: [paste plan JSON]
 Use the reviewer agent with this plan JSON and these files: [list files]
 ```
 
-### Ollama MCP tool (local / on-prem generation)
+### Ollama (automatic local generation)
 
-The Worker can delegate generation to your local Ollama instance:
+Ollama is used automatically — no configuration required. At the start of every
+Execute phase the workflow probes `list_local_models`. If a model is found, it
+calls `ask_local_model_for_code` for each step and passes the result to the
+Haiku Worker as a starting point. If Ollama is offline or has no models, the
+Worker falls back to Haiku-only generation silently.
 
-```
-Use the ollama-local MCP tool to generate a Go implementation of a
-binary search tree. Language: Go.
-```
+To get Ollama running with a good model, see **Prerequisites → Finding a model
+to use** above.
 
-Available tools:
+**Available MCP tools** (also callable directly from Claude):
 - `recommend_model` — RAM-based fallback recommender (no Node.js required)
 - `list_local_models` — see what models are pulled locally
 - `ask_local_model(model, prompt, system)` — raw generation
 - `ask_local_model_for_code(prompt, context, language)` — code-optimised wrapper
+- `log_event` — append a metrics record to `metrics.jsonl`
+- `get_metrics_summary` — print the CLI metrics summary
 
-**Choosing and configuring the local model.** The Worker's local model is *not*
-hardcoded — set it once via an environment variable and the server picks it up:
+**Overriding the model.** The probe picks the first model returned by Ollama.
+To pin a specific model, set it once via an environment variable:
 
-| Variable               | Default               | Purpose                                  |
-|------------------------|-----------------------|------------------------------------------|
-| `OLLAMA_DEFAULT_MODEL` | `qwen2.5-coder:32b`   | Model used when none is passed explicitly |
-| `OLLAMA_BASE_URL`      | `http://localhost:11434` | Ollama endpoint                       |
-| `OLLAMA_TIMEOUT`       | `120`                 | Generation timeout (seconds)             |
+| Variable               | Default                  | Purpose                                          |
+|------------------------|--------------------------|--------------------------------------------------|
+| `OLLAMA_DEFAULT_MODEL` | `qwen2.5-coder:32b`      | Fallback model when none is passed explicitly    |
+| `OLLAMA_BASE_URL`      | `http://localhost:11434`  | Ollama endpoint                                  |
+| `OLLAMA_TIMEOUT`       | `120`                    | Generation timeout (seconds)                     |
 
-For a more accurate recommendation that accounts for GPU VRAM, quantization,
-and a catalog of 229+ models, use the `llm-checker` MCP server instead
-(see **Model selection with llm-checker** below).
+The auto-probe picks the first model returned by `list_local_models`. To force
+a specific model across all steps, set `OLLAMA_DEFAULT_MODEL` and it will be
+used as the fallback whenever the probe's first-pick is overridden.
+
+For a hardware-aware recommendation across 229+ models, use the `llm-checker`
+MCP server (see **Model selection with llm-checker** below).
 
 ---
 
@@ -566,8 +606,21 @@ ERROR: Ollama is not running. Start it with `ollama serve`.
 ```
 
 Run `ollama serve` in a terminal (or configure it as a system service). The
-Worker will fall back to Haiku automatically; the Ollama tools just return
-error strings rather than raising exceptions.
+workflow probes Ollama once at the start of each Execute phase — if it's
+offline the probe silently falls back to Haiku-only generation. No manual
+intervention required.
+
+### Ollama is detected but code generation looks wrong
+
+The probe picks the first model returned by `list_local_models`. If that model
+is not suited for coding (e.g. a general-purpose model), pin a better one:
+
+```bash
+export OLLAMA_DEFAULT_MODEL=qwen2.5-coder:7b
+```
+
+The Haiku Worker always adapts and overwrites poor Ollama output, so a
+mismatched model degrades quality but never breaks the workflow.
 
 ### MCP server not connecting
 
