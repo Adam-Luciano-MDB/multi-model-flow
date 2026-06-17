@@ -9,7 +9,8 @@ echo ""
 
 # 1. Install Python dependencies
 echo "[1/3] Installing Ollama MCP server dependencies..."
-pip install -r "$PROJECT_ROOT/mcp/requirements.txt"
+python3.11 -m pip install -r "$PROJECT_ROOT/mcp/requirements.txt" 2>/dev/null \
+  || pip3 install -r "$PROJECT_ROOT/mcp/requirements.txt"
 echo "      Done."
 echo ""
 
@@ -61,6 +62,9 @@ echo "  [ ] 5. Restart Claude Code so the new MCP servers are loaded."
 echo ""
 echo "  [ ] 6. Edit CLAUDE.md with your project description, tech stack,"
 echo "         and directory structure."
+echo ""
+echo "Run the test suite (Python 3.11+ required):"
+echo "  python3.11 -m pytest tests/ -v"
 echo ""
 echo "Test the MCP connections by asking Claude:"
 echo '  "Use the llm-checker hw_detect tool to inspect my hardware."'
