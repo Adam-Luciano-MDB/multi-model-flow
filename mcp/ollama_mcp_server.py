@@ -7,6 +7,7 @@ import json
 import os
 import sys
 import time
+from typing import Optional
 
 import httpx
 from fastmcp import FastMCP
@@ -95,7 +96,7 @@ def recommend_model() -> str:
     return "\n".join(lines)
 
 
-def _total_ram_gb() -> float | None:
+def _total_ram_gb() -> Optional[float]:
     """Best-effort total physical RAM in GB across macOS and Linux."""
     try:
         # Available on Linux and macOS without extra deps.
