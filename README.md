@@ -84,6 +84,48 @@ about trade-offs that Haiku handles poorly under ambiguous specs.
 - **Node.js 16+** (for llm-checker model recommendations — `node --version`)
 - **Ollama** (optional, for local model offload)
 
+### Installing Ollama
+
+```bash
+# macOS / Linux (one-liner installer)
+curl -fsSL https://ollama.com/install.sh | sh
+
+# macOS via Homebrew
+brew install ollama
+
+# Windows — download the installer from https://ollama.com/download
+```
+
+After installing, start the Ollama server:
+
+```bash
+ollama serve
+```
+
+Ollama runs on `http://localhost:11434` by default. You can verify it's up:
+
+```bash
+curl http://localhost:11434/api/tags
+```
+
+### Finding a model to use
+
+Once Ollama is running, ask Claude to recommend the best model for your hardware:
+
+```
+Use the llm-checker recommend tool with category: coding.
+```
+
+This scores 229+ models against your actual CPU, GPU, and RAM and returns a
+ranked list with estimated memory usage and tokens/sec. Then pull the top pick:
+
+```bash
+ollama pull qwen2.5-coder:7b   # replace with the recommended model name
+```
+
+See **Model selection with llm-checker** below for the full workflow including
+GPU-aware recommendations and keeping models up to date.
+
 ---
 
 ## Setup
