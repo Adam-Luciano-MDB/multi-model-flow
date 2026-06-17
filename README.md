@@ -3,8 +3,10 @@
 [![tests](https://github.com/Adam-Luciano-MDB/multi-model-flow/actions/workflows/test.yml/badge.svg)](https://github.com/Adam-Luciano-MDB/multi-model-flow/actions/workflows/test.yml)
 
 A three-agent Claude Code workflow that routes bulk implementation work to cheap
-models (Haiku / local Ollama) while reserving Opus for planning and Sonnet for
-review. Drop it into any codebase; it is framework and language agnostic.
+models (Haiku / local Ollama) while reserving Opus for planning and high-stakes
+review. Sonnet reviews every run; if its confidence score is below 8/10 it
+automatically escalates to Opus for a second opinion. Drop it into any codebase;
+it is framework and language agnostic.
 
 ---
 
@@ -24,8 +26,8 @@ In Claude Code, type:
 /dev-task-workflow Create a CSV parser utility with unit tests.
 ```
 
-You'll watch Opus plan → Haiku build → Sonnet review. When it finishes, see
-what ran and how long it took:
+You'll watch Opus plan → Haiku build → Sonnet review (escalates to Opus if
+confidence < 8). When it finishes, see what ran and how long it took:
 
 ```bash
 ./scripts/show_metrics.sh
@@ -41,39 +43,50 @@ That's the whole loop. Everything below is reference detail.
 User task description
         │
         ▼
-┌───────────────┐   JSON plan    ┌───────────────┐   files_written   ┌───────────────┐
-│   Planner     │ ─────────────► │    Worker      │ ─────────────────► │   Reviewer    │
-│    (opus)     │               │    (haiku)     │                   │   (sonnet)    │
-└───────────────┘               └───────────────┘                   └───────────────┘
-                                       │                                      │
-                                 (optional)                            verdict JSON
-                                       │
-                                       ▼
-                              ┌─────────────────┐
-                              │  Ollama MCP      │
-                              │ (local, free)    │
-                              └─────────────────┘
+┌───────────────┐  JSON plan   ┌──────────────────┐  files_written  ┌───────────────────┐
+│   Planner     │ ────────────►│     Worker        │ ───────────────►│  Reviewer         │
+│   (opus)      │              │  (haiku or ollama)│                 │  (sonnet)         │
+└───────────────┘              └──────────────────┘                 └─────────┬─────────┘
+                                        │                                      │
+                                   (optional)                       confidence score 1–10
+                                        │                                      │
+                                        ▼                           ┌──────────▼──────────┐
+                               ┌────────────────┐                  │   confidence ≥ 8?   │
+                               │   Ollama MCP   │                  └──────────┬──────────┘
+                               │  (local, free) │               no ▼          │ yes
+                               └────────────────┘        ┌───────────────┐    │
+                                                          │ Opus escalated│    │
+                                                          │    review     │    │
+                                                          └───────┬───────┘    │
+                                                                  └─────┬──────┘
+                                                                        │ verdict JSON
+                                                                        ▼
+                                                          ┌─────────────────────────┐
+                                                          │  metrics.jsonl          │
+                                                          │  + web dashboard :8765  │
+                                                          └─────────────────────────┘
 ```
 
 ---
 
 ## Cost model
 
-| Phase   | Agent    | Model (alias) | Why                                              |
-|---------|----------|---------------|--------------------------------------------------|
-| Plan    | Planner  | `opus`        | Ambiguous inputs, cross-file reasoning           |
-| Execute | Worker   | `haiku`       | Deterministic, instruction-following, high volume|
-| Execute | Worker   | Ollama (opt.) | On-prem / long-running / cost-free generation    |
-| Review  | Reviewer | `sonnet`      | Quality bar without Opus cost                    |
+| Phase            | Agent    | Model (alias) | When                                                      |
+|------------------|----------|---------------|-----------------------------------------------------------|
+| Plan             | Planner  | `opus`        | Always — ambiguous inputs, cross-file reasoning           |
+| Execute          | Worker   | `haiku`       | Default — deterministic, instruction-following, high volume|
+| Execute          | Worker   | Ollama (opt.) | On-prem / long-running / cost-free generation             |
+| Review           | Reviewer | `sonnet`      | Always — quality bar without Opus cost                    |
+| Review (escalate)| Reviewer | `opus`        | When Sonnet confidence < 8/10 — independent second opinion|
 
 The agent `model:` frontmatter uses **tier aliases** (`opus`, `sonnet`, `haiku`)
 rather than pinned version IDs. Aliases always resolve to the latest model in
-that tier, so the prototype keeps working as Anthropic ships new versions — no
+that tier, so the workflow keeps working as Anthropic ships new versions — no
 edits needed. If you need to pin a specific version for reproducibility, replace
 the alias with an exact ID (e.g. `claude-opus-4-8`) in the agent's frontmatter.
 
-Never route planning or review to Haiku — the JSON contracts require reasoning
-about trade-offs that Haiku handles poorly under ambiguous specs.
+Never route planning or routine review to Haiku — the JSON contracts require
+reasoning about trade-offs that Haiku handles poorly under ambiguous specs.
 
 ---
 
@@ -174,8 +187,11 @@ The workflow:
 1. Planner produces a JSON plan and **pauses for your confirmation if
    `risk_level` is `"high"`**
 2. Worker executes each step in order, writing files
-3. Reviewer checks the result; if rejected with `new_plan_needed: true`, the
-   workflow replans and retries (capped at 2 retries)
+3. Sonnet reviews the result and returns a verdict with a **confidence score
+   (1–10)**. If confidence is below 8, Opus is automatically called for an
+   independent second review
+4. If rejected with `new_plan_needed: true`, the workflow replans and retries
+   (capped at 2 retries)
 
 ### Autonomous mode (unattended)
 
@@ -570,4 +586,12 @@ then re-invoke to proceed.
 
 If Node.js is not available, use the `ollama-local recommend_model` tool as a
 fallback — it works without Node.js using RAM-based heuristics.
-</content>
+
+### Opus escalation fires on every run
+
+If Sonnet consistently scores below 8, the reviewer prompt may be under-specified
+or the tasks you're running are unusually broad. Options:
+- Tighten the task description so the scope is clear
+- Add more context to `CLAUDE.md` (tech stack, constraints, test conventions)
+- Raise the escalation threshold by editing the `confidence < 8` check in
+  `.claude/workflows/dev-task-workflow.js`
