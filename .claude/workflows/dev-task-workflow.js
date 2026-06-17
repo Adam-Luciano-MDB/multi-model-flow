@@ -137,7 +137,7 @@ ${allFilesWritten.join("\n")}
 Read each file, run the test suite if available, and return your verdict JSON.`
 
   const reviewText = await agent(reviewerPrompt, {
-    label: "reviewer",
+    label: "reviewer:sonnet",
     phase: "Review",
     agentType: "reviewer",
   })
@@ -151,6 +151,26 @@ Read each file, run the test suite if available, and return your verdict JSON.`
     log(`ERROR: Reviewer did not return valid JSON. Raw output:\n${reviewText}`)
     runOutcome = "review_parse_error"
     break
+  }
+
+  const confidence = typeof verdict.confidence === "number" ? verdict.confidence : 10
+  log(`Sonnet confidence: ${confidence}/10`)
+
+  // Escalate to Opus when Sonnet's confidence is below 8
+  if (confidence < 8) {
+    log(`Confidence ${confidence} < 8 — escalating review to Opus`)
+    const opusReviewText = await agent(
+      `${reviewerPrompt}\n\nNote: A Sonnet reviewer scored this ${confidence}/10 confidence. Please give it a thorough independent review and return your own verdict JSON.`,
+      { label: "reviewer:opus", phase: "Review", model: "opus" }
+    )
+    try {
+      const jsonMatch = opusReviewText.match(/\{[\s\S]*\}/)
+      if (!jsonMatch) throw new Error("No JSON found in Opus reviewer output")
+      verdict = JSON.parse(jsonMatch[0])
+      log(`Opus review complete (confidence: ${verdict.confidence ?? "n/a"}/10)`)
+    } catch (e) {
+      log(`WARNING: Opus reviewer did not return valid JSON — keeping Sonnet verdict`)
+    }
   }
 
   if (verdict.verdict === "approved" || verdict.verdict === "approved_with_notes") {

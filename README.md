@@ -110,14 +110,22 @@ curl http://localhost:11434/api/tags
 
 ### Finding a model to use
 
-Once Ollama is running, ask Claude to recommend the best model for your hardware:
+`llm-checker` is an MCP server that scores 229+ Ollama models against your
+hardware. It is installed and registered automatically by the setup script:
+
+```bash
+./scripts/setup_mcp.sh   # installs llm-checker globally and registers it with Claude Code
+```
+
+After running setup and **restarting Claude Code**, ask Claude to recommend
+the best model for your hardware:
 
 ```
 Use the llm-checker recommend tool with category: coding.
 ```
 
-This scores 229+ models against your actual CPU, GPU, and RAM and returns a
-ranked list with estimated memory usage and tokens/sec. Then pull the top pick:
+This returns a ranked list with estimated memory usage and tokens/sec for your
+specific CPU, GPU, and RAM. Pull the top-ranked model:
 
 ```bash
 ollama pull qwen2.5-coder:7b   # replace with the recommended model name
@@ -472,6 +480,7 @@ All inter-agent communication is structured JSON. Keep these schemas stable.
 ```json
 {
   "verdict": "approved|rejected|approved_with_notes",
+  "confidence": 9,
   "criteria_results": [
     {
       "criterion": "text from review_criteria",
@@ -485,6 +494,9 @@ All inter-agent communication is structured JSON. Keep these schemas stable.
   "replanning_notes": "what the Planner must change (only when new_plan_needed is true)"
 }
 ```
+
+`confidence` is 1–10. If Sonnet scores below 8, the workflow automatically
+escalates to Opus for an independent second review before accepting the verdict.
 
 ---
 

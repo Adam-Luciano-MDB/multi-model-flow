@@ -15,6 +15,7 @@ Run the test suite if one exists. Output a JSON verdict:
 ```json
 {
   "verdict": "approved|rejected|approved_with_notes",
+  "confidence": 8,
   "criteria_results": [
     {
       "criterion": "text from review_criteria",
@@ -27,6 +28,14 @@ Run the test suite if one exists. Output a JSON verdict:
   "new_plan_needed": true|false
 }
 ```
+
+`confidence` is an integer 1–10 reflecting how certain you are in your verdict:
+- **9–10**: you ran the tests, read every changed file, all criteria pass clearly
+- **7–8**: high confidence, minor ambiguity (e.g. couldn't run tests, one criterion is borderline)
+- **5–6**: moderate confidence — the change looks correct but the scope was large or context was limited
+- **1–4**: low confidence — unfamiliar domain, missing files, or the criteria were underspecified
+
+Be honest. A score of 7 or below triggers an automatic Opus escalation.
 
 If `new_plan_needed` is `true`, include a `"replanning_notes"` field explaining
 what the Planner must change.
