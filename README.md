@@ -328,7 +328,7 @@ passing the arg each time, set it via an environment variable:
 |------------------------|--------------------------|--------------------------------------------------|
 | `OLLAMA_DEFAULT_MODEL` | `qwen2.5-coder:32b`      | Fallback model when none is passed explicitly    |
 | `OLLAMA_BASE_URL`      | `http://localhost:11434`  | Ollama endpoint                                  |
-| `OLLAMA_TIMEOUT`       | `120`                    | Generation timeout (seconds)                     |
+| `OLLAMA_TIMEOUT`       | `1500`                   | Generation timeout in seconds (default 25 min)   |
 
 The auto-probe picks the first model returned by `list_local_models`. To force
 a specific model across all steps, set `OLLAMA_DEFAULT_MODEL` and it will be

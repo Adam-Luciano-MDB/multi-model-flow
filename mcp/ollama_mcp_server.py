@@ -20,7 +20,7 @@ OLLAMA_BASE = os.environ.get("OLLAMA_BASE_URL", "http://localhost:11434")
 # Developer-overridable default model. Set OLLAMA_DEFAULT_MODEL in your shell or
 # in the MCP server registration to pick the model that suits your hardware.
 DEFAULT_MODEL = os.environ.get("OLLAMA_DEFAULT_MODEL", "qwen2.5-coder:32b")
-TIMEOUT = int(os.environ.get("OLLAMA_TIMEOUT", "120"))  # seconds — long jobs
+TIMEOUT = int(os.environ.get("OLLAMA_TIMEOUT", "1500"))  # seconds — default 25 minutes
 
 # Rough RAM-to-model guidance for coding models. Each entry: (min_gb, model, note).
 # Ordered largest-first so the recommender picks the most capable model that fits.
