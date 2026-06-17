@@ -131,11 +131,11 @@ User task description
 | Review             | Reviewer | `sonnet`         | Always — quality bar without Opus cost                      |
 | Review (escalate)  | Reviewer | `opus`           | When Sonnet confidence < 8/10 — independent second opinion  |
 
-The agent `model:` frontmatter uses **tier aliases** (`opus`, `sonnet`, `haiku`)
-rather than pinned version IDs. Aliases always resolve to the latest model in
-that tier, so the workflow keeps working as Anthropic ships new versions — no
-edits needed. If you need to pin a specific version for reproducibility, replace
-the alias with an exact ID (e.g. `claude-opus-4-8`) in the agent's frontmatter.
+The workflow uses **tier aliases** (`opus`, `sonnet`, `haiku`, `fable`) rather
+than pinned version IDs. Aliases always resolve to the latest model in that
+tier, so the workflow keeps working as Anthropic ships new versions — no edits
+needed. If you need to pin a specific version for reproducibility, replace the
+alias with an exact ID (e.g. `claude-opus-4-8`) in the agent's frontmatter.
 
 Never route planning or routine review to Haiku — the JSON contracts require
 reasoning about trade-offs that Haiku handles poorly under ambiguous specs.
@@ -211,11 +211,10 @@ chmod +x scripts/setup_mcp.sh scripts/demo_task.sh
 #    (requires Python 3.10+ and Node.js 16+)
 ./scripts/setup_mcp.sh
 
-# 3. (If using Ollama) start Ollama, then find and pull the right model:
+# 3. (Optional) start Ollama — the workflow auto-detects it, no config needed:
 ollama serve &
-# Ask Claude: "Use the llm-checker recommend tool with category: coding."
-# Ask Claude: "Use the llm-checker ollama_pull tool with model: <recommended>"
-# See "Model selection with llm-checker" below for the full workflow.
+ollama pull qwen2.5-coder:7b   # or use llm-checker to find the best model for your hardware
+# See "Prerequisites → Finding a model" and "Model selection with llm-checker" below.
 
 # 4. Restart Claude Code to pick up the new MCP servers
 
@@ -324,15 +323,17 @@ Workflow({ name: "dev-task-workflow", args: { task: "...", ollamaModel: "devstra
 **Setting a persistent default.** To always use a specific model without
 passing the arg each time, set it via an environment variable:
 
-| Variable               | Default                  | Purpose                                          |
-|------------------------|--------------------------|--------------------------------------------------|
-| `OLLAMA_DEFAULT_MODEL` | `qwen2.5-coder:32b`      | Fallback model when none is passed explicitly    |
-| `OLLAMA_BASE_URL`      | `http://localhost:11434`  | Ollama endpoint                                  |
-| `OLLAMA_TIMEOUT`       | `1500`                   | Generation timeout in seconds (default 25 min)   |
+| Variable               | Default                  | Purpose                                                        |
+|------------------------|--------------------------|----------------------------------------------------------------|
+| `OLLAMA_DEFAULT_MODEL` | `qwen2.5-coder:32b`      | Server-side fallback used by `ask_local_model` when no model arg is passed |
+| `OLLAMA_BASE_URL`      | `http://localhost:11434`  | Ollama endpoint                                               |
+| `OLLAMA_TIMEOUT`       | `1500`                   | Generation timeout in seconds (default 25 min)                |
 
-The auto-probe picks the first model returned by `list_local_models`. To force
-a specific model across all steps, set `OLLAMA_DEFAULT_MODEL` and it will be
-used as the fallback whenever the probe's first-pick is overridden.
+> **Note:** `OLLAMA_DEFAULT_MODEL` is a server-side default, not what the
+> workflow probe uses. The probe picks the **first model returned by
+> `list_local_models`**. To control which model the workflow uses, pass
+> `ollamaModel` as a run arg (see above) or make sure the model you want is
+> the only one — or the first one — pulled locally.
 
 For a hardware-aware recommendation across 229+ models, use the `llm-checker`
 MCP server (see **Model selection with llm-checker** below).
@@ -357,7 +358,7 @@ the project root (gitignored, append-only JSONL):
 | Event | Source | What's captured |
 |-------|--------|-----------------|
 | `ollama_call` | Python MCP server | model, latency (ms), prompt/response size, outcome |
-| `workflow` | Workflow JS via `log_event` | task preview, steps planned, files written, retries, verdict |
+| `workflow` | Workflow JS via `log_event` | task preview, steps planned, files written, retries, verdict, ollama_model |
 
 Each record: `{"ts": <unix float>, "phase": "...", "model": "...", "outcome": "...", "meta": {...}}`
 
@@ -405,7 +406,7 @@ Use the Claude Console for cost reporting on those tiers.
 **What the metrics tell you:**
 - `steps_planned` vs `files_written` — if files < steps, some steps wrote nothing (check worker output)
 - `retries` > 0 — task descriptions that caused reviewer rejection; tighten the description or CLAUDE.md
-- Ollama `avg latency` — if consistently > 30s, try a smaller quantization or model size
+- Ollama `avg latency` — if consistently > 60s on a fast machine, try a smaller quantization or model size; the default timeout is 25 min (`OLLAMA_TIMEOUT=1500`)
 - Ollama `Errors` > 0 — Ollama went offline mid-run; check `ollama serve`
 
 ### View metrics in a web dashboard

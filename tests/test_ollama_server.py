@@ -124,6 +124,73 @@ class TestAskLocalModel:
         assert payload["model"] == server.DEFAULT_MODEL
 
 
+class TestAskLocalModelForCode:
+    def test_returns_string_on_success(self):
+        mock_resp = MagicMock()
+        mock_resp.json.return_value = {"response": "def hello(): pass"}
+        with patch("httpx.get", return_value=MagicMock(json=lambda: {"models": [{"name": "qwen2.5-coder:7b"}]})):
+            with patch("httpx.post", return_value=mock_resp):
+                with patch.object(_metrics_mod, "append"):
+                    result = server.ask_local_model_for_code("write a hello function", language="Python")
+        assert result == "def hello(): pass"
+
+    def test_prefers_devstral_when_available(self):
+        mock_resp = MagicMock()
+        mock_resp.json.return_value = {"response": "ok"}
+        with patch("httpx.get", return_value=MagicMock(json=lambda: {
+            "models": [{"name": "qwen2.5-coder:7b"}, {"name": "devstral:latest"}]
+        })):
+            with patch("httpx.post", return_value=mock_resp) as mock_post:
+                with patch.object(_metrics_mod, "append"):
+                    server.ask_local_model_for_code("prompt")
+        payload = mock_post.call_args.kwargs["json"]
+        assert payload["model"] == "devstral:latest"
+
+    def test_falls_back_to_default_model_when_no_models_available(self):
+        mock_resp = MagicMock()
+        mock_resp.json.return_value = {"response": "ok"}
+        with patch("httpx.get", side_effect=Exception("offline")):
+            with patch("httpx.post", return_value=mock_resp) as mock_post:
+                with patch.object(_metrics_mod, "append"):
+                    server.ask_local_model_for_code("prompt")
+        payload = mock_post.call_args.kwargs["json"]
+        assert payload["model"] == server.DEFAULT_MODEL
+
+    def test_prepends_context_to_prompt(self):
+        mock_resp = MagicMock()
+        mock_resp.json.return_value = {"response": "ok"}
+        with patch("httpx.get", return_value=MagicMock(json=lambda: {"models": [{"name": "qwen2.5-coder:7b"}]})):
+            with patch("httpx.post", return_value=mock_resp) as mock_post:
+                with patch.object(_metrics_mod, "append"):
+                    server.ask_local_model_for_code("add a method", context="class Foo: pass")
+        payload = mock_post.call_args.kwargs["json"]
+        assert "Context (existing code):" in payload["prompt"]
+        assert "class Foo: pass" in payload["prompt"]
+        assert "add a method" in payload["prompt"]
+
+    def test_language_hint_appears_in_system_prompt(self):
+        mock_resp = MagicMock()
+        mock_resp.json.return_value = {"response": "ok"}
+        with patch("httpx.get", return_value=MagicMock(json=lambda: {"models": [{"name": "qwen2.5-coder:7b"}]})):
+            with patch("httpx.post", return_value=mock_resp) as mock_post:
+                with patch.object(_metrics_mod, "append"):
+                    server.ask_local_model_for_code("prompt", language="Go")
+        payload = mock_post.call_args.kwargs["json"]
+        assert "Go" in payload["system"]
+
+    def test_returns_error_string_when_ollama_offline(self):
+        with patch("httpx.get", side_effect=Exception("offline")):
+            with patch("httpx.post", side_effect=httpx.ConnectError("refused")):
+                with patch.object(_metrics_mod, "append"):
+                    result = server.ask_local_model_for_code("prompt")
+        assert result.startswith("ERROR")
+
+
+class TestTimeoutDefault:
+    def test_default_timeout_is_1500_seconds(self):
+        assert server.TIMEOUT == 1500
+
+
 class TestLogEvent:
     def test_writes_parseable_record_to_metrics(self, tmp_path):
         f = str(tmp_path / "m.jsonl")
