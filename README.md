@@ -263,6 +263,14 @@ Or non-interactively from a script (this is what `./scripts/demo_task.sh` does):
 claude --print "Use the dev-task-workflow with auto mode enabled (auto: true) and task: <your task>"
 ```
 
+All supported args:
+
+| Arg           | Type    | Default | Purpose                                               |
+|---------------|---------|---------|-------------------------------------------------------|
+| `task`        | string  | —       | The development task description (required)           |
+| `auto`        | boolean | false   | Skip high-risk plan confirmation halt                 |
+| `ollamaModel` | string  | —       | Pin a specific Ollama model; skips the auto-probe     |
+
 In auto mode a high-risk plan is logged and executed instead of halting. Use it
 deliberately — the confirmation step exists to catch destructive plans before
 any file is written.
@@ -301,8 +309,20 @@ to use** above.
 - `log_event` — append a metrics record to `metrics.jsonl`
 - `get_metrics_summary` — print the CLI metrics summary
 
-**Overriding the model.** The probe picks the first model returned by Ollama.
-To pin a specific model, set it once via an environment variable:
+**Pinning a model for a single run.** Pass `ollamaModel` as a workflow arg to
+skip the auto-probe and use a specific model:
+
+```
+/dev-task-workflow with ollamaModel: devstral:latest — Add a rate limiter to /api/v2
+```
+
+Or via the Workflow tool directly:
+```js
+Workflow({ name: "dev-task-workflow", args: { task: "...", ollamaModel: "devstral:latest" } })
+```
+
+**Setting a persistent default.** To always use a specific model without
+passing the arg each time, set it via an environment variable:
 
 | Variable               | Default                  | Purpose                                          |
 |------------------------|--------------------------|--------------------------------------------------|

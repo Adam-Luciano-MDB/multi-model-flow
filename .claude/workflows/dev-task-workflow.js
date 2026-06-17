@@ -8,10 +8,12 @@ export const meta = {
   ],
 }
 
-// args: { task: string, auto?: boolean } — the task description; when `auto`
-// is true the workflow runs end-to-end and does NOT halt on a high-risk plan.
+// args: { task: string, auto?: boolean, ollamaModel?: string }
+//   auto        — skip high-risk confirmation halt
+//   ollamaModel — pin a specific Ollama model; skips the auto-probe
 const taskDescription = (args && args.task) ? args.task : args
 const autoMode = !!(args && args.auto)
+const pinnedOllamaModel = (args && args.ollamaModel) ? String(args.ollamaModel) : null
 
 const MAX_RETRIES = 2
 let retryCount = 0
@@ -114,11 +116,15 @@ Task: ${currentTask}`
 
   phase("Execute")
 
-  // Probe Ollama once per workflow run. If a local model is available it will
-  // pre-generate code for each step; the Worker then adapts and writes the file.
+  // Determine the Ollama model to use for code pre-generation.
+  // If the caller pinned a model (ollamaModel arg), use it directly and skip
+  // the probe. Otherwise auto-detect by calling list_local_models.
   // Falls back to Haiku-only if Ollama is offline or has no models pulled.
   let ollamaModel = null
-  {
+  if (pinnedOllamaModel) {
+    ollamaModel = pinnedOllamaModel
+    log(`Ollama model pinned by caller — using ${ollamaModel}`)
+  } else {
     const probeText = await agent(
       "Call the ollama-local list_local_models tool. Return ONLY the first model name from the list, or the single word \"none\" if the list is empty or Ollama is not running.",
       { label: "ollama:probe", phase: "Execute", model: "haiku" }
@@ -127,7 +133,7 @@ Task: ${currentTask}`
       const firstLine = probeText.trim().split("\n")[0].replace(/^[\s•\-*]+/, "").trim()
       if (firstLine && !firstLine.startsWith("ERROR") && firstLine.toLowerCase() !== "none") {
         ollamaModel = firstLine
-        log(`Ollama available — ${ollamaModel} will assist with code generation`)
+        log(`Ollama auto-detected — ${ollamaModel} will assist with code generation`)
       }
     }
     if (!ollamaModel) log("Ollama not available — Worker will use Haiku for all generation")
