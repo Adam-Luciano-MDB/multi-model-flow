@@ -8,8 +8,10 @@ export const meta = {
   ],
 }
 
-// args: { task: string } — the natural-language task description
+// args: { task: string, auto?: boolean } — the task description; when `auto`
+// is true the workflow runs end-to-end and does NOT halt on a high-risk plan.
 const taskDescription = (args && args.task) ? args.task : args
+const autoMode = !!(args && args.auto)
 
 const MAX_RETRIES = 2
 let retryCount = 0
@@ -48,12 +50,15 @@ while (retryCount <= MAX_RETRIES) {
   runStepsPlanned = plan.steps.length
   log(`Plan ready — ${plan.steps.length} step(s), risk: ${plan.risk_level}`)
 
-  if (plan.risk_level === "high") {
+  if (plan.risk_level === "high" && !autoMode) {
     log(
-      `HIGH RISK PLAN — please review before proceeding:\n${JSON.stringify(plan, null, 2)}\n\nRe-invoke the workflow with user approval to continue.`
+      `HIGH RISK PLAN — please review before proceeding:\n${JSON.stringify(plan, null, 2)}\n\nRe-invoke with { auto: true } (or run the auto demo) to proceed without confirmation.`
     )
     runOutcome = "high_risk"
     break
+  }
+  if (plan.risk_level === "high" && autoMode) {
+    log(`HIGH RISK PLAN — auto mode enabled, proceeding without confirmation.`)
   }
 
   // ─── Phase 2: Execute ────────────────────────────────────────────────────

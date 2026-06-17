@@ -14,9 +14,14 @@ echo "  Phase 1 (Plan)    — Opus decomposes the task into a JSON execution pla
 echo "  Phase 2 (Execute) — Haiku writes the module and tests step by step"
 echo "  Phase 3 (Review)  — Sonnet verifies correctness and style"
 echo ""
+echo "This is the AUTONOMOUS path: it runs unattended via 'claude --print' and"
+echo "passes auto mode so it won't pause even on a high-risk plan."
+echo "For a hands-on run, use the interactive slash command instead (see README):"
+echo "  /dev-task-workflow $DEMO_TASK"
+echo ""
 echo "Starting in 3 seconds... (Ctrl-C to cancel)"
 sleep 3
 echo ""
 
 claude --print \
-  "Use the dev-task-workflow with task: $DEMO_TASK"
+  "Use the dev-task-workflow with auto mode enabled (auto: true) and task: $DEMO_TASK"

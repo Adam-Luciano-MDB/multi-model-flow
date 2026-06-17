@@ -1,8 +1,37 @@
 # Planner-Worker-Reviewer
 
+[![tests](https://github.com/Adam-Luciano-MDB/multi-model-flow/actions/workflows/test.yml/badge.svg)](https://github.com/Adam-Luciano-MDB/multi-model-flow/actions/workflows/test.yml)
+
 A three-agent Claude Code workflow that routes bulk implementation work to cheap
 models (Haiku / local Ollama) while reserving Opus for planning and Sonnet for
 review. Drop it into any codebase; it is framework and language agnostic.
+
+---
+
+## Quickstart
+
+```bash
+# 1. Install MCP servers + dependencies
+./scripts/setup_mcp.sh
+
+# 2. Restart Claude Code, then in an interactive session run the demo task:
+#    (no Ollama model required — Worker falls back to Haiku)
+```
+
+In Claude Code, type:
+
+```
+/dev-task-workflow Create a CSV parser utility with unit tests.
+```
+
+You'll watch Opus plan → Haiku build → Sonnet review. When it finishes, see
+what ran and how long it took:
+
+```bash
+./scripts/show_metrics.sh
+```
+
+That's the whole loop. Everything below is reference detail.
 
 ---
 
@@ -14,7 +43,7 @@ User task description
         ▼
 ┌───────────────┐   JSON plan    ┌───────────────┐   files_written   ┌───────────────┐
 │   Planner     │ ─────────────► │    Worker      │ ─────────────────► │   Reviewer    │
-│  (Opus 4.8)   │               │  (Haiku 4.5)   │                   │ (Sonnet 4.6)  │
+│    (opus)     │               │    (haiku)     │                   │   (sonnet)    │
 └───────────────┘               └───────────────┘                   └───────────────┘
                                        │                                      │
                                  (optional)                            verdict JSON
@@ -84,17 +113,38 @@ ollama serve &
 
 ### Full three-phase workflow (recommended)
 
+In an interactive Claude Code session, invoke it as a slash command:
+
 ```
-Use the dev-task-workflow with task: Add a rate-limiting middleware to the
-/api/v2 routes that caps requests at 100/minute per IP.
+/dev-task-workflow Add a rate-limiting middleware to the /api/v2 routes that
+caps requests at 100/minute per IP.
 ```
 
 The workflow:
-1. Planner produces a JSON plan and pauses for user confirmation if `risk_level`
-   is `"high"`
+1. Planner produces a JSON plan and **pauses for your confirmation if
+   `risk_level` is `"high"`**
 2. Worker executes each step in order, writing files
 3. Reviewer checks the result; if rejected with `new_plan_needed: true`, the
    workflow replans and retries (capped at 2 retries)
+
+### Autonomous mode (unattended)
+
+To run end-to-end without the high-risk confirmation halt — for CI, scripts, or
+when you trust the task — enable auto mode:
+
+```
+/dev-task-workflow with auto mode (auto: true): <your task>
+```
+
+Or non-interactively from a script (this is what `./scripts/demo_task.sh` does):
+
+```bash
+claude --print "Use the dev-task-workflow with auto mode enabled (auto: true) and task: <your task>"
+```
+
+In auto mode a high-risk plan is logged and executed instead of halting. Use it
+deliberately — the confirmation step exists to catch destructive plans before
+any file is written.
 
 ### Individual agents (simpler tasks)
 
