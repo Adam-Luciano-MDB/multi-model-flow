@@ -1,8 +1,8 @@
 {
   "mcpServers": {
     "ollama-local": {
-      "command": "python3",
-      "args": ["${CLAUDE_PLUGIN_ROOT}/mcp/ollama_mcp_server.py"]
+      "command": "bash",
+      "args": ["${CLAUDE_PLUGIN_ROOT}/mcp/launch.sh"]
     }
   }
 }

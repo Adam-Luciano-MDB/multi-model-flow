@@ -32,7 +32,7 @@ if [ "$GLOBAL" = true ]; then
     echo "      standalone for project-mode use.)"
 else
     echo "[2/3] Registering ollama-local MCP server with Claude Code..."
-    claude mcp add "ollama-local" --transport stdio -- python3 "$PROJECT_ROOT/mcp/ollama_mcp_server.py"
+    claude mcp add "ollama-local" --transport stdio -- bash "$PROJECT_ROOT/mcp/launch.sh"
     echo "      Done."
 fi
 echo ""
