@@ -70,6 +70,18 @@ class TestReadAll:
             records = metrics.read_all()
         assert len(records) == 2
 
+    def test_skips_malformed_json_lines(self, tmp_path):
+        f = str(tmp_path / "m.jsonl")
+        with open(f, "w") as fh:
+            fh.write(json.dumps({"phase": "a", "ts": 1.0}) + "\n")
+            fh.write("THIS IS NOT JSON\n")  # truncated write from prior crash
+            fh.write(json.dumps({"phase": "b", "ts": 2.0}) + "\n")
+        with patch.object(metrics, "METRICS_FILE", f):
+            records = metrics.read_all()
+        assert len(records) == 2
+        assert records[0]["phase"] == "a"
+        assert records[1]["phase"] == "b"
+
 
 class TestSummarize:
     def test_returns_no_metrics_message_when_empty(self, tmp_path):
@@ -235,6 +247,34 @@ class TestAggregate:
         assert len(result["ollama"]["by_model"]) == 1
         assert result["ollama"]["approx_tokens_in"] == 0
         assert result["ollama"]["approx_tokens_out"] == 0
+
+    def test_ollama_record_missing_duration_ms_excluded_from_avg(self, tmp_path):
+        f = str(tmp_path / "m.jsonl")
+        with open(f, "w") as fh:
+            fh.write(json.dumps({
+                "ts": 1.0, "phase": "ollama_call", "model": "m", "outcome": "success",
+                "meta": {"duration_ms": 4000, "prompt_chars": 100, "response_chars": 50},
+            }) + "\n")
+            fh.write(json.dumps({
+                "ts": 2.0, "phase": "ollama_call", "model": "m", "outcome": "error",
+                "meta": {},  # no duration_ms
+            }) + "\n")
+        with patch.object(metrics, "METRICS_FILE", f):
+            result = metrics.aggregate()
+        entry = result["ollama"]["by_model"][0]
+        assert entry["avg_latency_ms"] == 4000.0  # only the one with duration_ms counts
+        assert entry["errors"] == 1
+
+    def test_retries_as_non_integer_does_not_crash(self, tmp_path):
+        f = str(tmp_path / "m.jsonl")
+        with open(f, "w") as fh:
+            fh.write(json.dumps({
+                "ts": 1.0, "phase": "workflow", "outcome": "approved",
+                "meta": {"retries": "2"},  # stored as string (corrupt record)
+            }) + "\n")
+        with patch.object(metrics, "METRICS_FILE", f):
+            result = metrics.aggregate()
+        assert result["workflow"]["avg_retries"] == 2.0
 
     def test_recent_runs_limited_to_last_10(self, tmp_path):
         f = str(tmp_path / "m.jsonl")

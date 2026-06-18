@@ -166,6 +166,15 @@ INDEX_HTML = """<!DOCTYPE html>
     </div>
 
     <script>
+        function escapeHtml(s) {
+            return String(s)
+                .replace(/&/g, '&amp;')
+                .replace(/</g, '&lt;')
+                .replace(/>/g, '&gt;')
+                .replace(/"/g, '&quot;')
+                .replace(/'/g, '&#39;');
+        }
+
         async function loadMetrics() {
             try {
                 const response = await fetch('/api/metrics');
@@ -260,12 +269,12 @@ INDEX_HTML = """<!DOCTYPE html>
                 `;
                 for (const run of workflow.recent) {
                     const ts = new Date(run.ts * 1000).toLocaleString();
-                    const statusClass = `status-${run.outcome}`;
-                    const task = run.task.substring(0, 80);
+                    const statusClass = `status-${escapeHtml(run.outcome)}`;
+                    const task = escapeHtml(run.task.substring(0, 80));
                     html += `
                         <tr>
                             <td>${ts}</td>
-                            <td class="${statusClass}">${run.outcome}</td>
+                            <td class="${statusClass}">${escapeHtml(run.outcome)}</td>
                             <td>${run.steps_planned !== null ? run.steps_planned : '—'}</td>
                             <td>${run.files_written !== null ? run.files_written : '—'}</td>
                             <td>${run.retries}</td>
@@ -302,7 +311,7 @@ INDEX_HTML = """<!DOCTYPE html>
                         : 'n/a';
                     html += `
                         <tr>
-                            <td>${model.model}</td>
+                            <td>${escapeHtml(model.model)}</td>
                             <td>${model.calls}</td>
                             <td>${latency}</td>
                             <td>${model.errors}</td>

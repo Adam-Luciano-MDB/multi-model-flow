@@ -76,6 +76,13 @@ class TestRecommendModel:
                 result = server.recommend_model()
         assert "ollama pull" in result
 
+    def test_reports_already_installed_when_model_present(self):
+        with patch.object(server, "_total_ram_gb", return_value=64.0):
+            with patch.object(server, "list_local_models", return_value=["qwen2.5-coder:32b"]):
+                result = server.recommend_model()
+        assert "installed already" in result
+        assert "ollama pull" not in result
+
 
 class TestAskLocalModel:
     def test_returns_error_string_not_exception_when_offline(self):
@@ -113,6 +120,23 @@ class TestAskLocalModel:
         assert logged[0]["meta"]["prompt_chars"] == len("write a function")
         assert logged[0]["meta"]["response_chars"] == len("def foo(): pass")
         assert logged[0]["meta"]["duration_ms"] >= 0
+
+    def test_returns_error_string_on_http_status_error(self):
+        mock_resp = MagicMock()
+        mock_resp.raise_for_status.side_effect = Exception("403 Forbidden")
+        with patch("httpx.post", return_value=mock_resp):
+            with patch.object(_metrics_mod, "append"):
+                result = server.ask_local_model("qwen2.5-coder:7b", "hello")
+        assert result.startswith("ERROR")
+
+    def test_includes_system_prompt_in_payload(self):
+        mock_resp = MagicMock()
+        mock_resp.json.return_value = {"response": "ok"}
+        with patch("httpx.post", return_value=mock_resp) as mock_post:
+            with patch.object(_metrics_mod, "append"):
+                server.ask_local_model("qwen2.5-coder:7b", "prompt", system="Be concise.")
+        payload = mock_post.call_args.kwargs["json"]
+        assert payload["system"] == "Be concise."
 
     def test_uses_default_model_when_model_arg_is_empty(self):
         mock_resp = MagicMock()
@@ -225,6 +249,13 @@ class TestLogEvent:
             result = server.log_event("review", "sonnet", "rejected")
         assert "Logged" in result
         assert "review" in result
+
+    def test_empty_metadata_json_defaults_to_empty_dict(self, tmp_path):
+        f = str(tmp_path / "m.jsonl")
+        with patch.object(_metrics_mod, "METRICS_FILE", f):
+            server.log_event("plan", "opus", "success")  # no metadata_json arg
+        record = json.loads(open(f).read())
+        assert record["meta"] == {}
 
 
 class TestGetMetricsSummary:

@@ -25,7 +25,16 @@ def append(record: dict) -> None:
 def read_all() -> list[dict]:
     try:
         with open(METRICS_FILE) as fh:
-            return [json.loads(line) for line in fh if line.strip()]
+            records = []
+            for line in fh:
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    records.append(json.loads(line))
+                except json.JSONDecodeError:
+                    pass  # skip lines truncated by a previous crash or disk-full
+            return records
     except FileNotFoundError:
         return []
 
@@ -46,7 +55,7 @@ def summarize() -> str:
         total_retries = 0
         for r in workflow_records:
             outcome_counts[r.get("outcome", "unknown")] += 1
-            total_retries += r.get("meta", {}).get("retries", 0)
+            total_retries += int(r.get("meta", {}).get("retries", 0) or 0)
         lines.append(f"Total:    {len(workflow_records)}")
         lines.append("Outcomes: " + "  ".join(f"{k}={v}" for k, v in sorted(outcome_counts.items())))
         lines.append(f"Avg retries per run: {total_retries / len(workflow_records):.1f}")
@@ -128,7 +137,7 @@ def aggregate() -> dict:
         total_retries = 0
         for r in workflow_records:
             outcome_counts[r.get("outcome", "unknown")] += 1
-            total_retries += r.get("meta", {}).get("retries", 0)
+            total_retries += int(r.get("meta", {}).get("retries", 0) or 0)
         workflow_section["outcome_counts"] = dict(outcome_counts)
         workflow_section["avg_retries"] = total_retries / len(workflow_records)
 

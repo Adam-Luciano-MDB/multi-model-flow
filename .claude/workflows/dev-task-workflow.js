@@ -35,19 +35,32 @@ const EXT_LANG = { py: "Python", ts: "TypeScript", tsx: "TypeScript", js: "JavaS
 // Probe for Ollama once before the retry loop — availability doesn't change between retries.
 let ollamaModel = null
 if (pinnedOllamaModel) {
-  ollamaModel = pinnedOllamaModel
-  log(`Ollama model pinned by caller — using ${ollamaModel}`)
+  // Verify Ollama is reachable before committing to the pin — otherwise every
+  // step fires a Haiku call that silently fails with no benefit.
+  const pingText = await agent(
+    "Call the ollama-local list_local_models tool. Return only \"ok\" if Ollama responds (even if the list is empty), or \"offline\" if it cannot connect.",
+    { label: "ollama:probe", phase: "Execute", model: "haiku" }
+  )
+  if (pingText && /offline/i.test(pingText)) {
+    log(`⚠ WARNING: Ollama is offline — ignoring pinned model ${pinnedOllamaModel}, falling back to Haiku-only`)
+  } else {
+    ollamaModel = pinnedOllamaModel
+    log(`Ollama model pinned by caller — using ${ollamaModel}`)
+  }
 } else {
   const probeText = await agent(
-    "Call the ollama-local recommend_model tool. Return ONLY the recommended model name (e.g. 'qwen2.5-coder:7b') from its output, or the single word \"none\" if the output says the model is not installed or Ollama is unavailable.",
+    "Call the ollama-local list_local_models tool. Return the model names exactly as given, one per line, or the single word \"none\" if the list is empty or Ollama is not running.",
     { label: "ollama:probe", phase: "Execute", model: "haiku" }
   )
   if (probeText) {
-    const firstLine = probeText.trim().split("\n")[0].replace(/^[\s•\-*\d.]+/, "").trim()
-    if (firstLine && !/error/i.test(firstLine) && firstLine.toLowerCase() !== "none") {
-      ollamaModel = firstLine
-      log(`Ollama auto-detected — ${ollamaModel} will assist with code generation`)
-    }
+    const available = probeText.trim().split("\n")
+      .map(l => l.replace(/^[\s•\-*\d.]+/, "").trim())
+      .filter(l => l && !/error/i.test(l) && l.toLowerCase() !== "none")
+    // Prefer devstral (multi-language expert), then best qwen2.5-coder, then first available
+    const devstral = available.find(m => /devstral/i.test(m))
+    const qwen = available.find(m => /qwen2\.5-coder/i.test(m))
+    ollamaModel = devstral || qwen || available[0] || null
+    if (ollamaModel) log(`Ollama auto-detected — ${ollamaModel} will assist with code generation`)
   }
   if (!ollamaModel) log("Ollama not available — Worker will use Haiku for all generation")
 }
@@ -309,7 +322,7 @@ const taskPreview = String(taskDescription).slice(0, 80).replace(/["'`\\]/g, " "
 const modelsUsed = ollamaModel ? `opus+${ollamaModel}+haiku+sonnet` : "opus+haiku+sonnet"
 const metaJson = JSON.stringify({ task: taskPreview, steps_planned: runStepsPlanned, files_written: runFilesWritten.length, retries: runRetries, ollama_model: ollamaModel || "" })
 await agent(
-  `Use the ollama-local MCP tool log_event now. Pass these exact argument values:\n- phase: "workflow"\n- model: "${modelsUsed}"\n- outcome: "${runOutcome}"\n- metadata_json: '${metaJson}'`,
+  `Use the ollama-local MCP tool log_event now. Pass these exact argument values:\n- phase: "workflow"\n- model: "${modelsUsed}"\n- outcome: "${runOutcome}"\n- metadata_json: ${metaJson}`,
   { label: "metrics:workflow", model: "haiku" }
 )
 
