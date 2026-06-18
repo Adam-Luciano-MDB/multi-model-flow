@@ -22,10 +22,5 @@ After writing each file, output a completion JSON:
 {"step_id": N, "status": "complete", "files_written": ["path/to/file"]}
 ```
 
-**Context budget: keep your working context under 170k tokens (~680k characters).**
-Read only the `context_files` listed for your step. If a context file is large,
-read only the sections relevant to your instruction. Never load the entire
-codebase; the Planner has already scoped what you need.
-
 Bash access is limited to running linters, formatters, and the test suite.
 Do not run destructive operations (rm, git reset, etc.).
