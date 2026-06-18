@@ -37,6 +37,14 @@ _CLAUDE_COST_PER_CALL = {
     "haiku":  0.005,  # ~3k input + ~700 output @ $0.80/$4 per 1M tokens
 }
 
+# Estimated tokens per call (input + output) — derived from the cost assumptions above.
+_CLAUDE_TOKENS_PER_CALL = {
+    "opus":   8_900,   # ~8k input + ~900 output
+    "fable":  8_600,   # ~8k input + ~600 output
+    "sonnet": 13_500,  # ~12k input + ~1.5k output
+    "haiku":  3_700,   # ~3k input + ~700 output
+}
+
 
 def append(record: dict) -> None:
     record.setdefault("ts", time.time())
@@ -246,7 +254,8 @@ def aggregate() -> dict:
             continue
         cost = round(n * _CLAUDE_COST_PER_CALL.get(tier, 0), 4)
         total_claude_cost += cost
-        claude_by_tier.append({"tier": tier, "calls": n, "est_cost_usd": cost})
+        tokens = n * _CLAUDE_TOKENS_PER_CALL.get(tier, 0)
+        claude_by_tier.append({"tier": tier, "calls": n, "est_tokens": tokens, "est_cost_usd": cost})
 
     ollama_call_count = sum(m["calls"] for m in ollama_section["by_model"])
     est_ollama_savings = round(ollama_call_count * _CLAUDE_COST_PER_CALL["haiku"], 4)

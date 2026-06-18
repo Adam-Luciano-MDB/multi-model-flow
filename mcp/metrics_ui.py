@@ -372,16 +372,19 @@ INDEX_HTML = """<!DOCTYPE html>
                                 <tr>
                                     <th>Tier</th>
                                     <th>Calls</th>
+                                    <th>Est. Tokens</th>
                                     <th>Est. Cost</th>
                                 </tr>
                             </thead>
                             <tbody>
                 `;
+                const totalEstTokens = claude.by_tier.reduce((s, t) => s + (t.est_tokens || 0), 0);
                 for (const t of claude.by_tier) {
                     html += `
                         <tr>
                             <td>${escapeHtml(t.tier)}</td>
                             <td>${t.calls}</td>
+                            <td>${(t.est_tokens || 0).toLocaleString()}</td>
                             <td>~$${t.est_cost_usd.toFixed(3)}</td>
                         </tr>
                     `;
@@ -390,27 +393,30 @@ INDEX_HTML = """<!DOCTYPE html>
                         <tr style="font-weight:600;border-top:2px solid #e0e0e0;">
                             <td>Actual (mixed tiers)</td>
                             <td>${claude.total_calls}</td>
+                            <td>${totalEstTokens.toLocaleString()}</td>
                             <td>~$${claude.est_total_cost_usd.toFixed(3)}</td>
                         </tr>
                         <tr style="color:#dc3545;">
                             <td>If all-Opus</td>
                             <td>${claude.total_calls}</td>
+                            <td>—</td>
                             <td>~$${(claude.est_all_opus_cost_usd || 0).toFixed(3)}</td>
                         </tr>
                         <tr style="color:#fd7e14;">
                             <td>If all-Sonnet</td>
                             <td>${claude.total_calls}</td>
+                            <td>—</td>
                             <td>~$${(claude.est_all_sonnet_cost_usd || 0).toFixed(3)}</td>
                         </tr>
                 `;
                 if (claude.savings_vs_opus_usd > 0) {
                     html += `
                         <tr style="color:#28a745;font-weight:600;border-top:2px solid #e0e0e0;">
-                            <td colspan="2">Saved vs all-Opus</td>
+                            <td colspan="3">Saved vs all-Opus</td>
                             <td>~$${(claude.savings_vs_opus_usd || 0).toFixed(3)}</td>
                         </tr>
                         <tr style="color:#28a745;">
-                            <td colspan="2">Saved vs all-Sonnet</td>
+                            <td colspan="3">Saved vs all-Sonnet</td>
                             <td>~$${(claude.savings_vs_sonnet_usd || 0).toFixed(3)}</td>
                         </tr>
                     `;
@@ -418,7 +424,7 @@ INDEX_HTML = """<!DOCTYPE html>
                 if (claude.est_ollama_savings_usd > 0) {
                     html += `
                         <tr style="color:#28a745;">
-                            <td colspan="2">Ollama offloaded (saved vs Haiku)</td>
+                            <td colspan="3">Ollama offloaded (saved vs Haiku)</td>
                             <td>~$${claude.est_ollama_savings_usd.toFixed(3)}</td>
                         </tr>
                     `;
