@@ -15,6 +15,9 @@ const taskDescription = (args && args.task) ? args.task : args
 const autoMode = !!(args && args.auto)
 const pinnedOllamaModel = (args && args.ollamaModel) ? String(args.ollamaModel) : null
 
+// Per-tier Claude call counters — accumulated across retries, flushed into metrics.jsonl at run end.
+const calls = { opus: 0, haiku: 0, sonnet: 0, fable: 0 }
+
 const MAX_RETRIES = 2
 let retryCount = 0
 let currentTask = taskDescription
@@ -41,6 +44,7 @@ if (pinnedOllamaModel) {
     "Call the ollama-local list_local_models tool. Return only \"ok\" if Ollama responds (even if the list is empty), or \"offline\" if it cannot connect.",
     { label: "ollama:probe", phase: "Execute", model: "haiku" }
   )
+  calls.haiku++
   // Fail safe: only commit to the pin on an affirmative "ok". A null/empty/error
   // ping means reachability is unconfirmed — fall back rather than fire a failing
   // Ollama call on every step.
@@ -55,6 +59,7 @@ if (pinnedOllamaModel) {
     "Call the ollama-local list_local_models tool. Return the model names exactly as given, one per line, or the single word \"none\" if the list is empty or Ollama is not running.",
     { label: "ollama:probe", phase: "Execute", model: "haiku" }
   )
+  calls.haiku++
   if (probeText) {
     const available = probeText.trim().split("\n")
       .map(l => l.replace(/^\s*(?:[•\-*]|\d+[.)])\s*/, "").trim())
@@ -68,6 +73,9 @@ if (pinnedOllamaModel) {
   if (!ollamaModel) log("Ollama not available — Worker will use Haiku for all generation")
 }
 
+log(`multi-model-flow | planner: opus | worker: haiku${ollamaModel ? ` + ${ollamaModel}` : ""} | reviewer: sonnet`)
+log("Tip: run  python mcp/metrics_ui.py  after the workflow to open the metrics dashboard.")
+
 while (retryCount <= MAX_RETRIES) {
   // ─── Phase 1: Plan ───────────────────────────────────────────────────────
 
@@ -78,6 +86,7 @@ while (retryCount <= MAX_RETRIES) {
     `You are the planner agent. Decompose this development task into a JSON execution plan.\n\nTask: ${currentTask}`,
     { label: "planner", phase: "Plan", agentType: "planner" }
   )
+  calls.opus++
 
   let plan
   try {
@@ -116,6 +125,7 @@ Task: ${currentTask}`
       phase: "Plan",
       model: "fable",
     })
+    if (strengthenedText) calls.fable++
 
     if (!strengthenedText) {
       log(`Fable unavailable — asking Opus to self-validate the plan`)
@@ -124,6 +134,7 @@ Task: ${currentTask}`
         phase: "Plan",
         model: "opus",
       })
+      if (strengthenedText) calls.opus++
     }
 
     if (strengthenedText) {
@@ -177,6 +188,7 @@ Task: ${currentTask}`
         `Use the ollama-local ask_local_model_for_code tool with these arguments:\n- prompt: "${step.instruction.replace(/"/g, "'")}"\n- context: "Context files to be aware of: ${contextHint}"\n- language: "${language}"\n- model: "${ollamaModel}"\nReturn only the raw output from the tool.`,
         { label: `ollama:step-${step.step_id}`, phase: "Execute", model: "haiku" }
       )
+      if (ollamaText) calls.haiku++
       if (ollamaText && !/^error/i.test(ollamaText)) {
         ollamaContext = `\n\nOllama (${ollamaModel}) has pre-generated an implementation for this step. Use it as your starting point — adapt imports, style, and conventions to match the existing codebase:\n\n${ollamaText}`
       }
@@ -194,6 +206,7 @@ Execute ONLY step_id ${step.step_id}. Read all context_files first, then write t
       phase: "Execute",
       agentType: "worker",
     })
+    if (workerOutput) calls.haiku++
 
     // Check for error JSON
     const errorMatch = workerOutput.match(/\{"error"\s*:/)
@@ -253,6 +266,7 @@ Read each file, run the test suite if available, and return your verdict JSON.`
     phase: "Review",
     agentType: "reviewer",
   })
+  if (reviewText) calls.sonnet++
 
   let verdict
   try {
@@ -275,6 +289,7 @@ Read each file, run the test suite if available, and return your verdict JSON.`
       `${reviewerPrompt}\n\nNote: A Sonnet reviewer scored this ${confidence}/10 confidence. Please give it a thorough independent review and return your own verdict JSON.`,
       { label: "reviewer:opus", phase: "Review", model: "opus" }
     )
+    if (opusReviewText) calls.opus++
     try {
       const jsonMatch = opusReviewText.match(/\{[\s\S]*\}/)
       if (!jsonMatch) throw new Error("No JSON found in Opus reviewer output")
@@ -323,10 +338,11 @@ Read each file, run the test suite if available, and return your verdict JSON.`
 // Uses Haiku (cheap, fast) and silently no-ops if the MCP server is unavailable.
 const taskPreview = String(taskDescription).slice(0, 80).replace(/["'`\\]/g, " ").replace(/\s+/g, " ").trim()
 const modelsUsed = ollamaModel ? `opus+${ollamaModel}+haiku+sonnet` : "opus+haiku+sonnet"
-const metaJson = JSON.stringify({ task: taskPreview, steps_planned: runStepsPlanned, files_written: runFilesWritten.length, retries: runRetries, ollama_model: ollamaModel || "" })
+const metaJson = JSON.stringify({ task: taskPreview, steps_planned: runStepsPlanned, files_written: runFilesWritten.length, retries: runRetries, ollama_model: ollamaModel || "", claude_calls: calls })
 await agent(
   `Use the ollama-local MCP tool log_event now. Pass these exact argument values:\n- phase: "workflow"\n- model: "${modelsUsed}"\n- outcome: "${runOutcome}"\n- metadata_json: ${metaJson}`,
   { label: "metrics:workflow", model: "haiku" }
 )
 
+log("─ Done. View metrics: python mcp/metrics_ui.py  (opens dashboard at http://localhost:8765)")
 return { done: true }

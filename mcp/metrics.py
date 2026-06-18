@@ -28,6 +28,16 @@ def _to_int(value) -> int:
         return 0
 
 
+# Estimated Claude API cost per agent call (rough averages for multi-model-flow agent sizes).
+# Labelled "estimated" in the UI — actual costs depend on real token counts.
+_CLAUDE_COST_PER_CALL = {
+    "opus":   0.19,   # ~8k input + ~900 output @ $15/$75 per 1M tokens
+    "fable":  0.08,   # ~8k input + ~600 output (estimated)
+    "sonnet": 0.06,   # ~12k input + ~1.5k output @ $3/$15 per 1M tokens
+    "haiku":  0.005,  # ~3k input + ~700 output @ $0.80/$4 per 1M tokens
+}
+
+
 def append(record: dict) -> None:
     record.setdefault("ts", time.time())
     with open(METRICS_FILE, "a") as fh:
@@ -113,10 +123,27 @@ def summarize() -> str:
         lines.append(f"Approx tokens in:  {total_in // 4:,}  (from {total_in:,} chars)")
         lines.append(f"Approx tokens out: {total_out // 4:,}  (from {total_out:,} chars)")
         lines.append("")
-        lines.append(
-            "Note: Anthropic API calls (Opus/Sonnet/Haiku) are not tracked here.\n"
-            "Use the Claude Console for cost reporting on those tiers."
-        )
+    # ── Claude call summary ────────────────────────────────────────────────────
+    claude_totals: dict = {"opus": 0, "fable": 0, "sonnet": 0, "haiku": 0}
+    for r in workflow_records:
+        cc = r.get("meta", {}).get("claude_calls", {})
+        for tier, count in cc.items():
+            if tier in claude_totals:
+                claude_totals[tier] += _to_int(count)
+
+    if any(v > 0 for v in claude_totals.values()):
+        lines.append("=== Claude API Calls (estimated) ===")
+        total_claude_cost = 0.0
+        for tier in ("opus", "fable", "sonnet", "haiku"):
+            n = claude_totals[tier]
+            if n == 0:
+                continue
+            cost = n * _CLAUDE_COST_PER_CALL.get(tier, 0)
+            total_claude_cost += cost
+            lines.append(f"  {tier:<10}  {n:>3} call(s)  ~${cost:.3f}")
+        lines.append(f"  {'Total':<10}       ~${total_claude_cost:.3f}  (rough estimate)")
+        lines.append("  Costs estimated from call counts × typical prompt sizes.")
+        lines.append("")
 
     if not workflow_records and not ollama_records:
         lines.append("No workflow or Ollama events recorded yet.")
@@ -203,9 +230,36 @@ def aggregate() -> dict:
         ollama_section["approx_tokens_in"] = total_in // 4
         ollama_section["approx_tokens_out"] = total_out // 4
 
+    # ── Claude aggregation ────────────────────────────────────────────────────
+    claude_totals: dict = {"opus": 0, "fable": 0, "sonnet": 0, "haiku": 0}
+    for r in workflow_records:
+        cc = r.get("meta", {}).get("claude_calls", {})
+        for tier, count in cc.items():
+            if tier in claude_totals:
+                claude_totals[tier] += _to_int(count)
+
+    claude_by_tier = []
+    total_claude_cost = 0.0
+    for tier in ("opus", "fable", "sonnet", "haiku"):
+        n = claude_totals[tier]
+        if n == 0:
+            continue
+        cost = round(n * _CLAUDE_COST_PER_CALL.get(tier, 0), 4)
+        total_claude_cost += cost
+        claude_by_tier.append({"tier": tier, "calls": n, "est_cost_usd": cost})
+
+    ollama_call_count = sum(m["calls"] for m in ollama_section["by_model"])
+    est_ollama_savings = round(ollama_call_count * _CLAUDE_COST_PER_CALL["haiku"], 4)
+
     return {
         "workflow": workflow_section,
         "ollama": ollama_section,
+        "claude": {
+            "total_calls": sum(claude_totals.values()),
+            "by_tier": claude_by_tier,
+            "est_total_cost_usd": round(total_claude_cost, 4),
+            "est_ollama_savings_usd": est_ollama_savings,
+        },
     }
 
 

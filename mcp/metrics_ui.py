@@ -142,6 +142,10 @@ INDEX_HTML = """<!DOCTYPE html>
             color: #dc3545;
             font-weight: 600;
         }
+        .savings {
+            color: #28a745;
+            font-weight: 600;
+        }
         .loading {
             text-align: center;
             color: white;
@@ -192,6 +196,7 @@ INDEX_HTML = """<!DOCTYPE html>
         function renderDashboard(data) {
             const workflow = data.workflow;
             const ollama = data.ollama;
+            const claude = data.claude || { total_calls: 0, by_tier: [], est_total_cost_usd: 0, est_ollama_savings_usd: 0 };
             let html = '';
 
             // Summary cards
@@ -216,6 +221,16 @@ INDEX_HTML = """<!DOCTYPE html>
                 <div class="card">
                     <h3>Approx Tokens Out</h3>
                     <div class="value">${ollama.approx_tokens_out.toLocaleString()}</div>
+                </div>
+                <div class="card">
+                    <h3>Claude Calls</h3>
+                    <div class="value">${claude.total_calls}</div>
+                    <div class="subtext">~$${claude.est_total_cost_usd.toFixed(2)} est.</div>
+                </div>
+                <div class="card">
+                    <h3>Ollama Savings</h3>
+                    <div class="value savings">~$${claude.est_ollama_savings_usd.toFixed(2)}</div>
+                    <div class="subtext">vs Haiku for Ollama steps</div>
                 </div>
             `;
             html += '</div>';
@@ -321,6 +336,56 @@ INDEX_HTML = """<!DOCTYPE html>
                 html += `
                             </tbody>
                         </table>
+                    </div>
+                `;
+            }
+
+            // Claude API usage breakdown
+            if (claude.by_tier.length > 0) {
+                html += `
+                    <div class="table-card">
+                        <h2>Claude API Usage (estimated)</h2>
+                        <table>
+                            <thead>
+                                <tr>
+                                    <th>Tier</th>
+                                    <th>Calls</th>
+                                    <th>Est. Cost</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                `;
+                for (const t of claude.by_tier) {
+                    html += `
+                        <tr>
+                            <td>${escapeHtml(t.tier)}</td>
+                            <td>${t.calls}</td>
+                            <td>~$${t.est_cost_usd.toFixed(3)}</td>
+                        </tr>
+                    `;
+                }
+                html += `
+                        <tr style="font-weight:600;border-top:2px solid #e0e0e0;">
+                            <td>Total</td>
+                            <td>${claude.total_calls}</td>
+                            <td>~$${claude.est_total_cost_usd.toFixed(3)}</td>
+                        </tr>
+                `;
+                if (claude.est_ollama_savings_usd > 0) {
+                    html += `
+                        <tr>
+                            <td colspan="2" style="color:#28a745;">Ollama offloaded (saved vs Haiku)</td>
+                            <td style="color:#28a745;">~$${claude.est_ollama_savings_usd.toFixed(3)}</td>
+                        </tr>
+                    `;
+                }
+                html += `
+                            </tbody>
+                        </table>
+                        <p style="font-size:11px;color:#999;margin-top:8px;">
+                            Estimated from agent call counts × typical prompt sizes.
+                            See Claude Console for exact billing.
+                        </p>
                     </div>
                 `;
             }

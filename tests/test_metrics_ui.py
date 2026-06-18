@@ -29,6 +29,21 @@ class TestRenderMetricsJson:
         assert "workflow" in data
         assert "ollama" in data
 
+    def test_json_contains_claude_key(self, tmp_path):
+        f = str(tmp_path / "m.jsonl")
+        with open(f, "w") as fh:
+            fh.write(json.dumps({
+                "ts": 1750000000.0, "phase": "workflow", "outcome": "approved",
+                "meta": {"retries": 0, "claude_calls": {"opus": 1, "haiku": 5, "sonnet": 1, "fable": 0}},
+            }) + "\n")
+        with patch.object(metrics, "METRICS_FILE", f):
+            json_str = metrics_ui.render_metrics_json()
+        data = json.loads(json_str)
+        assert "claude" in data
+        assert data["claude"]["total_calls"] == 7
+        assert len(data["claude"]["by_tier"]) == 3  # opus, haiku, sonnet (fable=0 omitted)
+        assert data["claude"]["est_total_cost_usd"] > 0
+
     def test_json_contains_workflow_and_ollama_keys(self, tmp_path):
         f = str(tmp_path / "m.jsonl")
         with open(f, "w") as fh:
@@ -125,6 +140,14 @@ class TestIndexHtml:
         assert "/>/g, '&gt;'" in html
         assert "/'/g, '&#39;'" in html
         assert "&quot;" in html
+
+    def test_claude_section_present_in_html(self):
+        html = metrics_ui.INDEX_HTML
+        assert "Claude API Usage" in html
+        assert "Ollama Savings" in html
+        assert "Claude Calls" in html
+        assert "est_total_cost_usd" in html
+        assert "est_ollama_savings_usd" in html
 
     def test_user_controlled_fields_are_html_escaped(self):
         # Regression guard: stored XSS via task/outcome/model name. If a future

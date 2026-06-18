@@ -294,6 +294,82 @@ class TestAggregate:
         assert agg["workflow"]["avg_retries"] == 1.0
         assert isinstance(summary, str)
 
+    def test_aggregate_includes_claude_key(self, tmp_path):
+        f = str(tmp_path / "m.jsonl")
+        with patch.object(metrics, "METRICS_FILE", f):
+            result = metrics.aggregate()
+        assert "claude" in result
+        assert result["claude"]["total_calls"] == 0
+        assert result["claude"]["by_tier"] == []
+        assert result["claude"]["est_total_cost_usd"] == 0.0
+        assert result["claude"]["est_ollama_savings_usd"] == 0.0
+
+    def test_aggregate_claude_calls_summed_from_workflow_meta(self, tmp_path):
+        f = str(tmp_path / "m.jsonl")
+        with open(f, "w") as fh:
+            fh.write(json.dumps({
+                "ts": 1.0, "phase": "workflow", "outcome": "approved",
+                "meta": {"retries": 0, "claude_calls": {"opus": 1, "haiku": 5, "sonnet": 1, "fable": 0}},
+            }) + "\n")
+            fh.write(json.dumps({
+                "ts": 2.0, "phase": "workflow", "outcome": "approved",
+                "meta": {"retries": 0, "claude_calls": {"opus": 1, "haiku": 4, "sonnet": 1, "fable": 0}},
+            }) + "\n")
+        with patch.object(metrics, "METRICS_FILE", f):
+            result = metrics.aggregate()
+        assert result["claude"]["total_calls"] == 13  # (1+5+1) + (1+4+1)
+        tiers = {t["tier"]: t for t in result["claude"]["by_tier"]}
+        assert tiers["opus"]["calls"] == 2
+        assert tiers["haiku"]["calls"] == 9
+        assert tiers["sonnet"]["calls"] == 2
+        assert "fable" not in tiers  # zero-count tiers omitted
+
+    def test_aggregate_claude_backward_compat_missing_claude_calls(self, tmp_path):
+        # Old workflow records without claude_calls must not crash and contribute 0
+        f = str(tmp_path / "m.jsonl")
+        with open(f, "w") as fh:
+            fh.write(json.dumps({
+                "ts": 1.0, "phase": "workflow", "outcome": "approved",
+                "meta": {"retries": 0, "task": "old run"},  # no claude_calls key
+            }) + "\n")
+        with patch.object(metrics, "METRICS_FILE", f):
+            result = metrics.aggregate()
+        assert result["claude"]["total_calls"] == 0
+        assert result["claude"]["est_total_cost_usd"] == 0.0
+
+    def test_aggregate_est_ollama_savings_from_ollama_calls(self, tmp_path):
+        f = str(tmp_path / "m.jsonl")
+        with open(f, "w") as fh:
+            for _ in range(4):
+                fh.write(json.dumps({
+                    "ts": 1.0, "phase": "ollama_call", "model": "devstral",
+                    "outcome": "success",
+                    "meta": {"prompt_chars": 400, "response_chars": 200, "duration_ms": 1000},
+                }) + "\n")
+        with patch.object(metrics, "METRICS_FILE", f):
+            result = metrics.aggregate()
+        # 4 ollama calls × haiku cost per call = savings
+        expected = round(4 * metrics._CLAUDE_COST_PER_CALL["haiku"], 4)
+        assert result["claude"]["est_ollama_savings_usd"] == expected
+
+    def test_aggregate_claude_cost_estimated_from_call_counts(self, tmp_path):
+        f = str(tmp_path / "m.jsonl")
+        with open(f, "w") as fh:
+            fh.write(json.dumps({
+                "ts": 1.0, "phase": "workflow", "outcome": "approved",
+                "meta": {"retries": 0, "claude_calls": {"opus": 2, "sonnet": 1, "haiku": 6, "fable": 0}},
+            }) + "\n")
+        with patch.object(metrics, "METRICS_FILE", f):
+            result = metrics.aggregate()
+        c = result["claude"]
+        expected_cost = round(
+            2 * metrics._CLAUDE_COST_PER_CALL["opus"] +
+            1 * metrics._CLAUDE_COST_PER_CALL["sonnet"] +
+            6 * metrics._CLAUDE_COST_PER_CALL["haiku"],
+            4,
+        )
+        assert c["est_total_cost_usd"] == expected_cost
+
     def test_recent_runs_limited_to_last_10(self, tmp_path):
         f = str(tmp_path / "m.jsonl")
         with open(f, "w") as fh:
