@@ -16,6 +16,18 @@ from datetime import datetime, timezone
 METRICS_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "metrics.jsonl")
 
 
+def _to_int(value) -> int:
+    """Coerce a possibly-corrupt metrics value to int, defaulting to 0.
+
+    Handles ints, floats, numeric strings ("2", "2.7"), and junk ("abc", None)
+    without raising — corrupt records must never crash the metrics readers.
+    """
+    try:
+        return int(float(value))
+    except (TypeError, ValueError):
+        return 0
+
+
 def append(record: dict) -> None:
     record.setdefault("ts", time.time())
     with open(METRICS_FILE, "a") as fh:
@@ -55,7 +67,7 @@ def summarize() -> str:
         total_retries = 0
         for r in workflow_records:
             outcome_counts[r.get("outcome", "unknown")] += 1
-            total_retries += int(r.get("meta", {}).get("retries", 0) or 0)
+            total_retries += _to_int(r.get("meta", {}).get("retries", 0))
         lines.append(f"Total:    {len(workflow_records)}")
         lines.append("Outcomes: " + "  ".join(f"{k}={v}" for k, v in sorted(outcome_counts.items())))
         lines.append(f"Avg retries per run: {total_retries / len(workflow_records):.1f}")
@@ -137,7 +149,7 @@ def aggregate() -> dict:
         total_retries = 0
         for r in workflow_records:
             outcome_counts[r.get("outcome", "unknown")] += 1
-            total_retries += int(r.get("meta", {}).get("retries", 0) or 0)
+            total_retries += _to_int(r.get("meta", {}).get("retries", 0))
         workflow_section["outcome_counts"] = dict(outcome_counts)
         workflow_section["avg_retries"] = total_retries / len(workflow_records)
 

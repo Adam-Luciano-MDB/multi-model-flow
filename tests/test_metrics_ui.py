@@ -69,6 +69,32 @@ class TestRenderMetricsJson:
         assert data["workflow"]["total"] == 3
         assert data["workflow"]["avg_retries"] == (0 + 1 + 2) / 3
 
+    def test_ollama_section_round_trips(self, tmp_path):
+        f = str(tmp_path / "m.jsonl")
+        recs = [
+            {"ts": 1.0, "phase": "ollama_call", "model": "qwen", "outcome": "success",
+             "meta": {"prompt_chars": 400, "response_chars": 200, "duration_ms": 1000}},
+            {"ts": 2.0, "phase": "ollama_call", "model": "qwen", "outcome": "error",
+             "meta": {"prompt_chars": 400, "response_chars": 0, "duration_ms": 3000}},
+            {"ts": 3.0, "phase": "ollama_call", "model": "llama", "outcome": "success",
+             "meta": {"prompt_chars": 800, "response_chars": 200, "duration_ms": 2000}},
+        ]
+        with open(f, "w") as fh:
+            for r in recs:
+                fh.write(json.dumps(r) + "\n")
+        with patch.object(metrics, "METRICS_FILE", f):
+            data = json.loads(metrics_ui.render_metrics_json())
+        o = data["ollama"]
+        assert o["total"] == 3
+        # by_model sorted alphabetically: llama, qwen
+        assert [m["model"] for m in o["by_model"]] == ["llama", "qwen"]
+        qwen = next(m for m in o["by_model"] if m["model"] == "qwen")
+        assert qwen["calls"] == 2
+        assert qwen["errors"] == 1
+        assert qwen["avg_latency_ms"] == 2000.0  # (1000 + 3000) / 2
+        assert o["approx_tokens_in"] == (400 + 400 + 800) // 4
+        assert o["approx_tokens_out"] == (200 + 0 + 200) // 4
+
 
 class TestIndexHtml:
     def test_index_html_is_nonempty_string(self):
@@ -89,6 +115,27 @@ class TestIndexHtml:
         assert "<!DOCTYPE html>" in metrics_ui.INDEX_HTML
         assert "</html>" in metrics_ui.INDEX_HTML
         assert "<title>" in metrics_ui.INDEX_HTML
+
+    def test_escapehtml_helper_is_defined(self):
+        html = metrics_ui.INDEX_HTML
+        assert "function escapeHtml(s)" in html
+        # all five HTML-significant characters must be escaped
+        assert "/&/g, '&amp;'" in html
+        assert "/</g, '&lt;'" in html
+        assert "/>/g, '&gt;'" in html
+        assert "/'/g, '&#39;'" in html
+        assert "&quot;" in html
+
+    def test_user_controlled_fields_are_html_escaped(self):
+        # Regression guard: stored XSS via task/outcome/model name. If a future
+        # edit drops escapeHtml() around any of these interpolations, this fails.
+        html = metrics_ui.INDEX_HTML
+        assert "escapeHtml(run.outcome)" in html
+        assert "escapeHtml(run.task.substring(0, 80))" in html
+        assert "escapeHtml(model.model)" in html
+        # raw, un-escaped interpolations must NOT be present
+        assert "${run.outcome}" not in html
+        assert "${model.model}" not in html
 
 
 class TestMetricsRequestHandler:
@@ -166,3 +213,48 @@ class TestMetricsRequestHandler:
                 assert data["ollama"]["total"] == 0
             finally:
                 httpd.shutdown()
+
+    def test_get_api_metrics_with_ollama_data(self, tmp_path):
+        f = str(tmp_path / "m.jsonl")
+        with open(f, "w") as fh:
+            for i in range(2):
+                fh.write(json.dumps({
+                    "ts": 1.0 + i, "phase": "ollama_call", "model": "qwen",
+                    "outcome": "success",
+                    "meta": {"prompt_chars": 400, "response_chars": 200, "duration_ms": 1000},
+                }) + "\n")
+            fh.write(json.dumps({
+                "ts": 3.0, "phase": "ollama_call", "model": "llama", "outcome": "success",
+                "meta": {"prompt_chars": 800, "response_chars": 200, "duration_ms": 2000},
+            }) + "\n")
+        with patch.object(metrics, "METRICS_FILE", f):
+            httpd, port = self._start_server(f)
+            try:
+                conn = HTTPConnection("127.0.0.1", port)
+                conn.request("GET", "/api/metrics")
+                resp = conn.getresponse()
+                assert resp.status == 200
+                data = json.loads(resp.read().decode("utf-8"))
+                assert data["ollama"]["total"] == 3
+                assert len(data["ollama"]["by_model"]) == 2
+                assert data["ollama"]["approx_tokens_in"] == (400 + 400 + 800) // 4
+            finally:
+                httpd.shutdown()
+
+
+class TestMain:
+    """main() binds the real server; patch HTTPServer so it neither binds nor blocks."""
+
+    def test_uses_default_host_port(self):
+        with patch("metrics_ui.HTTPServer") as mock_server:
+            mock_server.return_value.serve_forever.side_effect = KeyboardInterrupt
+            with patch("sys.argv", ["metrics_ui.py"]):
+                metrics_ui.main()
+        assert mock_server.call_args[0][0] == ("127.0.0.1", 8765)
+
+    def test_respects_host_port_flags(self):
+        with patch("metrics_ui.HTTPServer") as mock_server:
+            mock_server.return_value.serve_forever.side_effect = KeyboardInterrupt
+            with patch("sys.argv", ["metrics_ui.py", "--host", "0.0.0.0", "--port", "9999"]):
+                metrics_ui.main()
+        assert mock_server.call_args[0][0] == ("0.0.0.0", 9999)

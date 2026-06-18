@@ -41,11 +41,14 @@ if (pinnedOllamaModel) {
     "Call the ollama-local list_local_models tool. Return only \"ok\" if Ollama responds (even if the list is empty), or \"offline\" if it cannot connect.",
     { label: "ollama:probe", phase: "Execute", model: "haiku" }
   )
-  if (pingText && /offline/i.test(pingText)) {
-    log(`⚠ WARNING: Ollama is offline — ignoring pinned model ${pinnedOllamaModel}, falling back to Haiku-only`)
-  } else {
+  // Fail safe: only commit to the pin on an affirmative "ok". A null/empty/error
+  // ping means reachability is unconfirmed — fall back rather than fire a failing
+  // Ollama call on every step.
+  if (pingText && /\bok\b/i.test(pingText) && !/offline/i.test(pingText)) {
     ollamaModel = pinnedOllamaModel
     log(`Ollama model pinned by caller — using ${ollamaModel}`)
+  } else {
+    log(`⚠ WARNING: Could not confirm Ollama is reachable — ignoring pinned model ${pinnedOllamaModel}, falling back to Haiku-only`)
   }
 } else {
   const probeText = await agent(
@@ -54,7 +57,7 @@ if (pinnedOllamaModel) {
   )
   if (probeText) {
     const available = probeText.trim().split("\n")
-      .map(l => l.replace(/^[\s•\-*\d.]+/, "").trim())
+      .map(l => l.replace(/^\s*(?:[•\-*]|\d+[.)])\s*/, "").trim())
       .filter(l => l && !/error/i.test(l) && l.toLowerCase() !== "none")
     // Prefer devstral (multi-language expert), then best qwen2.5-coder, then first available
     const devstral = available.find(m => /devstral/i.test(m))

@@ -265,7 +265,7 @@ class TestAggregate:
         assert entry["avg_latency_ms"] == 4000.0  # only the one with duration_ms counts
         assert entry["errors"] == 1
 
-    def test_retries_as_non_integer_does_not_crash(self, tmp_path):
+    def test_retries_as_numeric_string_is_parsed(self, tmp_path):
         f = str(tmp_path / "m.jsonl")
         with open(f, "w") as fh:
             fh.write(json.dumps({
@@ -275,6 +275,24 @@ class TestAggregate:
         with patch.object(metrics, "METRICS_FILE", f):
             result = metrics.aggregate()
         assert result["workflow"]["avg_retries"] == 2.0
+
+    def test_retries_as_junk_string_does_not_crash(self, tmp_path):
+        f = str(tmp_path / "m.jsonl")
+        with open(f, "w") as fh:
+            fh.write(json.dumps({
+                "ts": 1.0, "phase": "workflow", "outcome": "approved",
+                "meta": {"retries": "abc"},  # non-numeric junk
+            }) + "\n")
+            fh.write(json.dumps({
+                "ts": 2.0, "phase": "workflow", "outcome": "approved",
+                "meta": {"retries": "2.7"},  # float-valued string
+            }) + "\n")
+        with patch.object(metrics, "METRICS_FILE", f):
+            agg = metrics.aggregate()
+            summary = metrics.summarize()
+        # "abc" → 0, "2.7" → 2; avg over 2 runs = 1.0. Neither readers crash.
+        assert agg["workflow"]["avg_retries"] == 1.0
+        assert isinstance(summary, str)
 
     def test_recent_runs_limited_to_last_10(self, tmp_path):
         f = str(tmp_path / "m.jsonl")
