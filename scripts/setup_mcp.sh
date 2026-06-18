@@ -42,20 +42,20 @@ else
 fi
 echo ""
 
-# Optional: install workflow + agents globally so /multi-model-flow works in any project.
+# Optional: install the skill + agents globally so /multi-model-flow works in any project.
 # Uses symlinks (not copies) so a future `git pull` propagates changes automatically
 # without re-running this script.
 if [ "$GLOBAL" = true ]; then
     echo "[+] Installing /multi-model-flow globally to ~/.claude/ (symlinks) ..."
-    mkdir -p ~/.claude/workflows ~/.claude/agents ~/.claude/plugins
+    mkdir -p ~/.claude/agents ~/.claude/plugins
 
-    # Workflow and agent symlinks — these are what Claude Code loads for the slash command
-    ln -sf "$PROJECT_ROOT/.claude/workflows/multi-model-flow.js" ~/.claude/workflows/
+    # Agent symlinks — planner/worker/reviewer are referenced by agentType in the skill
     ln -sf "$PROJECT_ROOT/.claude/agents/planner.md"  ~/.claude/agents/
     ln -sf "$PROJECT_ROOT/.claude/agents/worker.md"   ~/.claude/agents/
     ln -sf "$PROJECT_ROOT/.claude/agents/reviewer.md" ~/.claude/agents/
 
-    # Plugin directory symlink — makes the plugin visible to Claude Code's plugin system
+    # Plugin directory symlink — exposes skills/multi-model-flow/SKILL.md as /multi-model-flow
+    # and makes the plugin visible in /plugin list
     ln -sf "$PROJECT_ROOT" ~/.claude/plugins/multi-model-flow
 
     echo "      Done — /multi-model-flow is now available in all Claude Code projects."

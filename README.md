@@ -1,13 +1,13 @@
-# Planner-Worker-Reviewer
+# multi-model-flow
 
 [![tests](https://github.com/Adam-Luciano-MDB/multi-model-flow/actions/workflows/test.yml/badge.svg)](https://github.com/Adam-Luciano-MDB/multi-model-flow/actions/workflows/test.yml)
 
-A three-agent Claude Code workflow that routes bulk implementation work to cheap
-models while reserving Opus for planning and high-stakes review. Ollama is
-used automatically when available — no configuration required.
+A Claude Code skill that routes bulk implementation work to cheap models while
+reserving Opus for planning and high-stakes review. Ollama is used automatically
+when available — no configuration required.
 
-- **Ollama auto-detect** — at the start of every Execute phase the workflow
-  probes Ollama. If a local model is running, it pre-generates code for each
+- **Ollama auto-detect** — at the start of every run the skill probes Ollama.
+  If a local model is running, it pre-generates code for each
   step; the Haiku Worker adapts and writes the final file. Falls back to
   Haiku-only when Ollama is offline.
 - **Plan confidence** — if Opus scores its own plan below 7/10, Fable refines
@@ -26,13 +26,11 @@ Drop it into any codebase; it is framework and language agnostic.
 > the workflow detects and uses it automatically. No registration or wiring
 > needed — just `ollama serve` and it works.
 
-> **`/multi-model-flow` is a project-scoped slash command.** Claude Code only
-> loads it when your working directory contains `.claude/workflows/multi-model-flow.js`.
-> To use it from any project, run `./scripts/setup_mcp.sh --global` — this
-> **symlinks** the workflow and agents into `~/.claude/` (no copying), so a
-> future `git pull` propagates updates automatically without re-running setup.
-> It also registers the repo as a Claude Code plugin under `~/.claude/plugins/`
-> so it shows up in `/plugin list`.
+> **`/multi-model-flow` is a standard Claude Code skill.** Install it globally
+> with `./scripts/setup_mcp.sh --global` — this **symlinks** the skill and
+> agents into `~/.claude/` so `/multi-model-flow` works in every project, and a
+> future `git pull` propagates updates automatically. The repo is registered as
+> a Claude Code plugin so it shows up in `/plugin list`.
 
 ```bash
 # 1. Install MCP servers + dependencies
@@ -711,8 +709,8 @@ underspecified. Options:
 - Add more context to `CLAUDE.md` (tech stack, file layout, conventions)
 - Include specific file paths or function names in your task description
 - Break the task into smaller, well-scoped sub-tasks
-- Lower the threshold by editing the `planConfidence < 7` check in
-  `.claude/workflows/multi-model-flow.js`
+- Lower the threshold by editing the `confidence < 7` check in
+  `skills/multi-model-flow/SKILL.md`
 
 If Fable is unavailable in your Claude Code plan, Opus self-validates instead —
 this costs an extra Opus call but produces the same strengthening effect.
@@ -724,4 +722,4 @@ or the tasks you're running are unusually broad. Options:
 - Tighten the task description so the scope is clear
 - Add more context to `CLAUDE.md` (tech stack, constraints, test conventions)
 - Raise the escalation threshold by editing the `confidence < 8` check in
-  `.claude/workflows/multi-model-flow.js`
+  `skills/multi-model-flow/SKILL.md`
