@@ -1,0 +1,21 @@
+{
+  "$schema": "https://anthropic.com/claude-code/marketplace.schema.json",
+  "name": "multi-model-flow",
+  "version": "0.1.0",
+  "description": "Cost-optimised coding pipeline for Claude Code: Opus plans, Haiku implements (with local Ollama when available), Sonnet reviews.",
+  "owner": {
+    "name": "Adam Luciano",
+    "url": "https://github.com/Adam-Luciano-MDB/multi-model-flow"
+  },
+  "plugins": [
+    {
+      "name": "multi-model-flow",
+      "description": "Planner -> Worker -> Reviewer pipeline where Opus plans, Haiku implements (with local Ollama when available), and Sonnet reviews. Provides the /mmf skill, three sub-agents, and the bundled ollama-local MCP server.",
+      "version": "0.1.0",
+      "author": { "name": "Adam Luciano", "email": "adam.luciano@mariadb.com" },
+      "category": "workflow",
+      "tags": ["cost-optimisation", "ollama", "planner-worker-reviewer", "local-models"],
+      "source": "./"
+    }
+  ]
+}

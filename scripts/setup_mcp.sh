@@ -51,18 +51,22 @@ else
 fi
 echo ""
 
-# Optional: install this clone as a plugin so /multi-model-flow works in any project.
-# A single symlink of the repo into ~/.claude/plugins/ exposes everything the plugin
-# ships — the skill (skills/), the agents (agents/), and the Ollama MCP server
-# (.mcp.json). Because it's a symlink (not a copy), a future `git pull` propagates
-# updates automatically without re-running this script.
+# Optional: install this clone as a plugin so /mmf works in any project.
+# Claude Code discovers plugins through marketplaces, so we register this repo as
+# a local marketplace (it ships .claude-plugin/marketplace.json) and install the
+# plugin from it. That exposes everything the plugin ships — the skill (skills/),
+# the agents (agents/), and the Ollama MCP server (.mcp.json) — in every project.
 if [ "$GLOBAL" = true ]; then
-    echo "[+] Installing /multi-model-flow as a plugin (~/.claude/plugins/, symlink) ..."
-    mkdir -p ~/.claude/plugins
-    ln -sf "$PROJECT_ROOT" ~/.claude/plugins/multi-model-flow
-    echo "      Done — /multi-model-flow, its agents, and the ollama-local MCP"
-    echo "      server are now available in all Claude Code projects."
-    echo "      Symlinked, not copied: git pull in the repo updates it automatically."
+    if ! command -v claude >/dev/null 2>&1; then
+        echo "[+] Skipping plugin install — 'claude' CLI not found on PATH."
+    else
+        echo "[+] Registering this repo as a marketplace and installing the plugin..."
+        claude plugin marketplace add "$PROJECT_ROOT" 2>&1 | sed 's/^/      /' || true
+        claude plugin install multi-model-flow@multi-model-flow 2>&1 | sed 's/^/      /' || true
+        echo "      Done — /mmf, its agents, and the ollama-local MCP server are now"
+        echo "      available in all Claude Code projects. Restart Claude Code to load them."
+        echo "      To update later: git pull, then 'claude plugin marketplace update multi-model-flow'."
+    fi
     echo ""
 fi
 

@@ -35,14 +35,26 @@ available in every project and registers the Ollama MCP server automatically.
 
 ```bash
 # 1. Install Python deps and (with --global) the plugin itself.
-#    --global symlinks this repo into ~/.claude/plugins/ so the skill, agents,
-#    and ollama-local MCP server are available in every project. Because it's a
-#    symlink, a future `git pull` propagates updates with no re-install.
+#    --global registers this repo as a Claude Code marketplace and installs the
+#    plugin from it, so the skill, agents, and ollama-local MCP server are
+#    available in every project.
 ./scripts/setup_mcp.sh --global
 
 # 2. Restart Claude Code, then in an interactive session run the demo task:
 #    (no Ollama model required — Worker falls back to Haiku)
 ```
+
+> **Installing manually (without the script).** Claude Code discovers plugins
+> through marketplaces — a bare symlink into `~/.claude/plugins/` is not picked
+> up. Register this repo as a marketplace, then install from it:
+>
+> ```bash
+> claude plugin marketplace add Adam-Luciano-MDB/multi-model-flow   # or a local path
+> claude plugin install multi-model-flow@multi-model-flow
+> ```
+>
+> Then restart Claude Code. Verify with `claude plugin list` and inspect the
+> bundled components with `claude plugin details multi-model-flow@multi-model-flow`.
 
 > The server is launched by `mcp/launch.sh`, which finds a Python **≥3.10**
 > that has `fastmcp` and `httpx` installed (it probes `python3.13` … `python3.10`,
@@ -233,9 +245,10 @@ GPU-aware recommendations and keeping models up to date.
 chmod +x scripts/setup_mcp.sh scripts/demo_task.sh
 
 # 2. Install Python deps, install llm-checker, and install the plugin globally
-#    (requires Python 3.10+ and Node.js 16+). --global symlinks this repo into
-#    ~/.claude/plugins/, which exposes the skill, the agents, and the
-#    ollama-local MCP server (via the bundled .mcp.json) in every project.
+#    (requires Python 3.10+ and Node.js 16+). --global registers this repo as a
+#    Claude Code marketplace and installs the plugin from it, exposing the skill,
+#    the agents, and the ollama-local MCP server (via the bundled .mcp.json) in
+#    every project.
 ./scripts/setup_mcp.sh --global
 
 # 3. (Optional) start Ollama — the skill auto-detects it, no config needed:
