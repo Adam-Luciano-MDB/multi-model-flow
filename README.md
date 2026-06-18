@@ -22,6 +22,13 @@ Drop it into any codebase; it is framework and language agnostic.
 
 ## Quickstart
 
+> **Ollama is zero-config.** If Ollama is running and has any model pulled,
+> the workflow detects and uses it automatically. No registration or wiring
+> needed — just `ollama serve` and it works.
+
+> **Slash commands load at startup.** If you installed or renamed the workflow
+> while Claude Code was open, restart Claude Code before running `/multi-model-flow`.
+
 ```bash
 # 1. Install MCP servers + dependencies
 ./scripts/setup_mcp.sh
