@@ -6,6 +6,8 @@ A Claude Code skill that routes bulk implementation work to cheap models while
 reserving Opus for planning and high-stakes review. Ollama is used automatically
 when available — no configuration required.
 
+Once installed, invoke it from any project with the **`/mmf`** slash command.
+
 - **Ollama auto-detect** — at the start of every run the skill probes Ollama.
   If a local model is running, it pre-generates code for each
   step; the Haiku Worker adapts and writes the final file. Falls back to
@@ -282,7 +284,7 @@ when you trust the task — add the `[auto]` flag:
 Or non-interactively from a script (this is what `./scripts/demo_task.sh` does):
 
 ```bash
-claude --print "Use the multi-model-flow skill in auto mode on this task: <your task>"
+claude --print "Use the mmf skill in auto mode on this task: <your task>"
 ```
 
 All supported flags (placed anywhere in the argument text):
@@ -691,7 +693,7 @@ mismatched model degrades quality but never breaks the run.
 The workflow caps retries at 2. If it still fails:
 1. Read the `blocking_issues` and `replanning_notes` printed to stdout
 2. Fix the underlying ambiguity in your task description or in CLAUDE.md
-3. Re-run: `Use the multi-model-flow with task: [revised description]`
+3. Re-run: `/mmf [revised description]`
 
 If the reviewer is overly strict for your project, edit
 `agents/reviewer.md` and loosen the blocking criteria.

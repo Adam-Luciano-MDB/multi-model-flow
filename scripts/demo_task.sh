@@ -24,4 +24,4 @@ sleep 3
 echo ""
 
 claude --print \
-  "Use the multi-model-flow skill in auto mode on this task: $DEMO_TASK"
+  "Use the mmf skill in auto mode on this task: $DEMO_TASK"
