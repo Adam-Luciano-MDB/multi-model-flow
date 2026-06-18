@@ -336,6 +336,8 @@ INDEX_HTML = """<!DOCTYPE html>
                                 <tr>
                                     <th>Model</th>
                                     <th>Calls</th>
+                                    <th>Tokens In</th>
+                                    <th>Tokens Out</th>
                                     <th>Avg Latency</th>
                                     <th>Errors</th>
                                 </tr>
@@ -350,6 +352,8 @@ INDEX_HTML = """<!DOCTYPE html>
                         <tr>
                             <td>${escapeHtml(model.model)}</td>
                             <td>${model.calls}</td>
+                            <td>${(model.approx_tokens_in || 0).toLocaleString()}</td>
+                            <td>${(model.approx_tokens_out || 0).toLocaleString()}</td>
                             <td>${latency}</td>
                             <td>${model.errors}</td>
                         </tr>

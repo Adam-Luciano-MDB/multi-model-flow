@@ -224,11 +224,15 @@ def aggregate() -> dict:
                 if c.get("meta", {}).get("duration_ms") is not None
             ]
             avg_latency_ms = sum(durations) / len(durations) if durations else None
+            tokens_in = sum(c.get("meta", {}).get("prompt_chars", 0) for c in calls) // 4
+            tokens_out = sum(c.get("meta", {}).get("response_chars", 0) for c in calls) // 4
             model_item = {
                 "model": model,
                 "calls": len(calls),
                 "avg_latency_ms": avg_latency_ms,
                 "errors": errors,
+                "approx_tokens_in": tokens_in,
+                "approx_tokens_out": tokens_out,
             }
             ollama_section["by_model"].append(model_item)
 
