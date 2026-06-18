@@ -44,10 +44,12 @@ available in every project and registers the Ollama MCP server automatically.
 #    (no Ollama model required — Worker falls back to Haiku)
 ```
 
-> The MCP server runs on the `python3` found on your PATH and needs `fastmcp`
-> and `httpx`. `setup_mcp.sh` installs them; if `claude mcp list` shows
-> `ollama-local` failing to start, run
-> `python3 -m pip install -r mcp/requirements.txt`.
+> The server is launched by `mcp/launch.sh`, which finds a Python **≥3.10**
+> that has `fastmcp` and `httpx` installed (it probes `python3.13` … `python3.10`,
+> then `python3`). `fastmcp` requires 3.10+, so a bare system `python3` (3.9 on
+> some macOS setups) won't work. `setup_mcp.sh` installs the deps; if
+> `claude mcp list` shows `ollama-local` failing with "Connection closed", run
+> `python3.11 -m pip install -r mcp/requirements.txt` (or any Python 3.10+).
 
 In Claude Code, type:
 
@@ -684,8 +686,10 @@ mismatched model degrades quality but never breaks the run.
 2. If missing: when installed as a plugin, the bundled `.mcp.json` registers
    `ollama-local` automatically — just restart Claude Code. For a standalone
    (non-plugin) clone, re-run `./scripts/setup_mcp.sh`.
-3. Confirm the Python deps are installed: `python3 -m pip install -r mcp/requirements.txt`
-   (the MCP server needs `fastmcp` and `httpx` on the `python3` that launches it)
+3. If it fails with "Connection closed", the launcher (`mcp/launch.sh`) couldn't
+   find a Python 3.10+ with the deps. Install them on a 3.10+ interpreter:
+   `python3.11 -m pip install -r mcp/requirements.txt`. (`fastmcp` needs Python
+   3.10+; a bare system `python3` is 3.9 on some macOS setups and won't work.)
 4. Restart Claude Code after registering
 
 ### Reviewer rejects in a loop
