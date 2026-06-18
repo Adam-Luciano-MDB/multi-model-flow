@@ -4,7 +4,15 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 
-echo "=== Planner-Worker-Reviewer: MCP Setup ==="
+# Parse --global flag
+GLOBAL=false
+for arg in "$@"; do
+  case "$arg" in
+    --global) GLOBAL=true ;;
+  esac
+done
+
+echo "=== Multi-Model-Flow: MCP Setup ==="
 echo ""
 
 # 1. Install Python dependencies
@@ -33,6 +41,18 @@ else
     echo "      Done."
 fi
 echo ""
+
+# Optional: install workflow + agents globally so /multi-model-flow works in any project
+if [ "$GLOBAL" = true ]; then
+    echo "[+] Installing /multi-model-flow globally to ~/.claude/ ..."
+    mkdir -p ~/.claude/workflows ~/.claude/agents
+    cp "$PROJECT_ROOT/.claude/workflows/multi-model-flow.js" ~/.claude/workflows/
+    cp "$PROJECT_ROOT/.claude/agents/planner.md"  ~/.claude/agents/
+    cp "$PROJECT_ROOT/.claude/agents/worker.md"   ~/.claude/agents/
+    cp "$PROJECT_ROOT/.claude/agents/reviewer.md" ~/.claude/agents/
+    echo "      Done — /multi-model-flow is now available in all Claude Code projects."
+    echo ""
+fi
 
 echo "=== Setup complete. Manual steps required: ==="
 echo ""

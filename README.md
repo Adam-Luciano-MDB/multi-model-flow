@@ -26,11 +26,14 @@ Drop it into any codebase; it is framework and language agnostic.
 > the workflow detects and uses it automatically. No registration or wiring
 > needed — just `ollama serve` and it works.
 
-> **Slash commands load at startup.** If you installed or renamed the workflow
-> while Claude Code was open, restart Claude Code before running `/multi-model-flow`.
+> **`/multi-model-flow` is a project-scoped slash command.** Claude Code only
+> loads it when your working directory contains `.claude/workflows/multi-model-flow.js`.
+> To use it in any project, either open Claude Code from this repo's directory,
+> or run `./scripts/setup_mcp.sh --global` to install it to `~/.claude/` so it's
+> available everywhere.
 
 ```bash
-# 1. Install MCP servers + dependencies
+# 1. Install MCP servers + dependencies (add --global to make the skill available in all projects)
 ./scripts/setup_mcp.sh
 
 # 2. Restart Claude Code, then in an interactive session run the demo task:
