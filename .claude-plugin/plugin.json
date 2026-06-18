@@ -1,0 +1,9 @@
+{
+  "name": "multi-model-flow",
+  "description": "Three-phase Planner → Worker → Reviewer workflow. Opus plans, Haiku implements (+ local Ollama), Sonnet reviews. Cost-optimised coding for any project.",
+  "author": {
+    "name": "Adam Luciano",
+    "email": "adam.luciano@mariadb.com"
+  },
+  "homepage": "https://github.com/Adam-Luciano-MDB/multi-model-flow"
+}

@@ -28,12 +28,15 @@ Drop it into any codebase; it is framework and language agnostic.
 
 > **`/multi-model-flow` is a project-scoped slash command.** Claude Code only
 > loads it when your working directory contains `.claude/workflows/multi-model-flow.js`.
-> To use it in any project, either open Claude Code from this repo's directory,
-> or run `./scripts/setup_mcp.sh --global` to install it to `~/.claude/` so it's
-> available everywhere.
+> To use it from any project, run `./scripts/setup_mcp.sh --global` — this
+> **symlinks** the workflow and agents into `~/.claude/` (no copying), so a
+> future `git pull` propagates updates automatically without re-running setup.
+> It also registers the repo as a Claude Code plugin under `~/.claude/plugins/`
+> so it shows up in `/plugin list`.
 
 ```bash
-# 1. Install MCP servers + dependencies (add --global to make the skill available in all projects)
+# 1. Install MCP servers + dependencies
+#    Add --global to symlink the skill into ~/.claude/ so it works in every project
 ./scripts/setup_mcp.sh
 
 # 2. Restart Claude Code, then in an interactive session run the demo task:
@@ -219,6 +222,8 @@ chmod +x scripts/setup_mcp.sh scripts/demo_task.sh
 
 # 2. Install MCP dependencies and register both MCP servers
 #    (requires Python 3.10+ and Node.js 16+)
+#    Pass --global to symlink the skill into ~/.claude/ — makes /multi-model-flow
+#    available in every project and auto-updates when you git pull this repo.
 ./scripts/setup_mcp.sh
 
 # 3. (Optional) start Ollama — the workflow auto-detects it, no config needed:
