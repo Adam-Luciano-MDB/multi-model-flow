@@ -370,6 +370,24 @@ class TestAggregate:
         )
         assert c["est_total_cost_usd"] == expected_cost
 
+    def test_aggregate_claude_includes_cost_comparison_fields(self, tmp_path):
+        f = str(tmp_path / "m.jsonl")
+        with open(f, "w") as fh:
+            fh.write(json.dumps({
+                "ts": 1.0, "phase": "workflow", "outcome": "approved",
+                "meta": {"retries": 0, "claude_calls": {"opus": 1, "sonnet": 1, "haiku": 4, "fable": 0}},
+            }) + "\n")
+        with patch.object(metrics, "METRICS_FILE", f):
+            result = metrics.aggregate()
+        c = result["claude"]
+        total_calls = 6  # 1+1+4
+        assert c["est_all_opus_cost_usd"] == round(total_calls * metrics._CLAUDE_COST_PER_CALL["opus"], 4)
+        assert c["est_all_sonnet_cost_usd"] == round(total_calls * metrics._CLAUDE_COST_PER_CALL["sonnet"], 4)
+        assert c["savings_vs_opus_usd"] == round(c["est_all_opus_cost_usd"] - c["est_total_cost_usd"], 4)
+        assert c["savings_vs_sonnet_usd"] == round(c["est_all_sonnet_cost_usd"] - c["est_total_cost_usd"], 4)
+        # Actual mixed cost must be less than all-Opus cost
+        assert c["est_total_cost_usd"] < c["est_all_opus_cost_usd"]
+
     def test_recent_runs_limited_to_last_10(self, tmp_path):
         f = str(tmp_path / "m.jsonl")
         with open(f, "w") as fh:

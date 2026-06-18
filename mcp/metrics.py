@@ -251,14 +251,22 @@ def aggregate() -> dict:
     ollama_call_count = sum(m["calls"] for m in ollama_section["by_model"])
     est_ollama_savings = round(ollama_call_count * _CLAUDE_COST_PER_CALL["haiku"], 4)
 
+    total_calls = sum(claude_totals.values())
+    est_all_opus = round(total_calls * _CLAUDE_COST_PER_CALL["opus"], 4)
+    est_all_sonnet = round(total_calls * _CLAUDE_COST_PER_CALL["sonnet"], 4)
+
     return {
         "workflow": workflow_section,
         "ollama": ollama_section,
         "claude": {
-            "total_calls": sum(claude_totals.values()),
+            "total_calls": total_calls,
             "by_tier": claude_by_tier,
             "est_total_cost_usd": round(total_claude_cost, 4),
             "est_ollama_savings_usd": est_ollama_savings,
+            "est_all_opus_cost_usd": est_all_opus,
+            "est_all_sonnet_cost_usd": est_all_sonnet,
+            "savings_vs_opus_usd": round(est_all_opus - total_claude_cost, 4),
+            "savings_vs_sonnet_usd": round(est_all_sonnet - total_claude_cost, 4),
         },
     }
 

@@ -149,6 +149,20 @@ class TestIndexHtml:
         assert "est_total_cost_usd" in html
         assert "est_ollama_savings_usd" in html
 
+    def test_cost_comparison_fields_in_html(self):
+        html = metrics_ui.INDEX_HTML
+        assert "est_all_opus_cost_usd" in html
+        assert "est_all_sonnet_cost_usd" in html
+        assert "savings_vs_opus_usd" in html
+        assert "savings_vs_sonnet_usd" in html
+        assert "If all-Opus" in html
+        assert "If all-Sonnet" in html
+        assert "renderCostChart" in html
+
+    def test_dashboard_title_is_mariadb(self):
+        html = metrics_ui.INDEX_HTML
+        assert "MariaDB Multi-Model-Flow Metrics Dashboard" in html
+
     def test_user_controlled_fields_are_html_escaped(self):
         # Regression guard: stored XSS via task/outcome/model name. If a future
         # edit drops escapeHtml() around any of these interpolations, this fails.

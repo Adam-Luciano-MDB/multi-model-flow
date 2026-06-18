@@ -24,7 +24,7 @@ INDEX_HTML = """<!DOCTYPE html>
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Metrics Dashboard</title>
+    <title>MariaDB Multi-Model-Flow Metrics Dashboard</title>
     <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.js"></script>
     <style>
         * {
@@ -163,7 +163,7 @@ INDEX_HTML = """<!DOCTYPE html>
 </head>
 <body>
     <div class="container">
-        <h1>Metrics Dashboard</h1>
+        <h1>MariaDB Multi-Model-Flow Metrics Dashboard</h1>
         <div id="content">
             <div class="loading">Loading metrics...</div>
         </div>
@@ -232,6 +232,16 @@ INDEX_HTML = """<!DOCTYPE html>
                     <div class="value savings">~$${claude.est_ollama_savings_usd.toFixed(2)}</div>
                     <div class="subtext">vs Haiku for Ollama steps</div>
                 </div>
+                <div class="card">
+                    <h3>Savings vs All-Opus</h3>
+                    <div class="value savings">~$${(claude.savings_vs_opus_usd || 0).toFixed(2)}</div>
+                    <div class="subtext">actual vs ${(claude.est_all_opus_cost_usd || 0).toFixed(2)} all-Opus</div>
+                </div>
+                <div class="card">
+                    <h3>Savings vs All-Sonnet</h3>
+                    <div class="value savings">~$${(claude.savings_vs_sonnet_usd || 0).toFixed(2)}</div>
+                    <div class="subtext">actual vs ${(claude.est_all_sonnet_cost_usd || 0).toFixed(2)} all-Sonnet</div>
+                </div>
             `;
             html += '</div>';
 
@@ -257,6 +267,18 @@ INDEX_HTML = """<!DOCTYPE html>
                         <h2>Calls by Model</h2>
                         <div class="chart-container">
                             <canvas id="callsChart"></canvas>
+                        </div>
+                    </div>
+                `;
+            }
+
+            // Cost comparison chart
+            if (claude.total_calls > 0) {
+                html += `
+                    <div class="chart-card">
+                        <h2>Cost Comparison</h2>
+                        <div class="chart-container">
+                            <canvas id="costChart"></canvas>
                         </div>
                     </div>
                 `;
@@ -366,16 +388,38 @@ INDEX_HTML = """<!DOCTYPE html>
                 }
                 html += `
                         <tr style="font-weight:600;border-top:2px solid #e0e0e0;">
-                            <td>Total</td>
+                            <td>Actual (mixed tiers)</td>
                             <td>${claude.total_calls}</td>
                             <td>~$${claude.est_total_cost_usd.toFixed(3)}</td>
                         </tr>
+                        <tr style="color:#dc3545;">
+                            <td>If all-Opus</td>
+                            <td>${claude.total_calls}</td>
+                            <td>~$${(claude.est_all_opus_cost_usd || 0).toFixed(3)}</td>
+                        </tr>
+                        <tr style="color:#fd7e14;">
+                            <td>If all-Sonnet</td>
+                            <td>${claude.total_calls}</td>
+                            <td>~$${(claude.est_all_sonnet_cost_usd || 0).toFixed(3)}</td>
+                        </tr>
                 `;
+                if (claude.savings_vs_opus_usd > 0) {
+                    html += `
+                        <tr style="color:#28a745;font-weight:600;border-top:2px solid #e0e0e0;">
+                            <td colspan="2">Saved vs all-Opus</td>
+                            <td>~$${(claude.savings_vs_opus_usd || 0).toFixed(3)}</td>
+                        </tr>
+                        <tr style="color:#28a745;">
+                            <td colspan="2">Saved vs all-Sonnet</td>
+                            <td>~$${(claude.savings_vs_sonnet_usd || 0).toFixed(3)}</td>
+                        </tr>
+                    `;
+                }
                 if (claude.est_ollama_savings_usd > 0) {
                     html += `
-                        <tr>
-                            <td colspan="2" style="color:#28a745;">Ollama offloaded (saved vs Haiku)</td>
-                            <td style="color:#28a745;">~$${claude.est_ollama_savings_usd.toFixed(3)}</td>
+                        <tr style="color:#28a745;">
+                            <td colspan="2">Ollama offloaded (saved vs Haiku)</td>
+                            <td>~$${claude.est_ollama_savings_usd.toFixed(3)}</td>
                         </tr>
                     `;
                 }
@@ -398,6 +442,9 @@ INDEX_HTML = """<!DOCTYPE html>
             }
             if (ollama.total > 0 && ollama.by_model.length > 0) {
                 renderCallsChart(ollama.by_model);
+            }
+            if (claude.total_calls > 0) {
+                renderCostChart(claude);
             }
         }
 
@@ -467,6 +514,47 @@ INDEX_HTML = """<!DOCTYPE html>
                             beginAtZero: true,
                             ticks: {
                                 stepSize: 1,
+                            },
+                        },
+                    },
+                },
+            });
+        }
+
+        function renderCostChart(claude) {
+            const ctx = document.getElementById('costChart').getContext('2d');
+            new Chart(ctx, {
+                type: 'bar',
+                data: {
+                    labels: ['Actual (mixed)', 'If all-Sonnet', 'If all-Opus'],
+                    datasets: [{
+                        label: 'Estimated Cost (USD)',
+                        data: [
+                            claude.est_total_cost_usd,
+                            claude.est_all_sonnet_cost_usd || 0,
+                            claude.est_all_opus_cost_usd || 0,
+                        ],
+                        backgroundColor: ['#28a745', '#fd7e14', '#dc3545'],
+                        borderColor: ['#28a745', '#fd7e14', '#dc3545'],
+                        borderWidth: 1,
+                    }],
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    plugins: {
+                        legend: { display: false },
+                        tooltip: {
+                            callbacks: {
+                                label: (ctx) => ` ~$${ctx.parsed.y.toFixed(3)}`,
+                            },
+                        },
+                    },
+                    scales: {
+                        y: {
+                            beginAtZero: true,
+                            ticks: {
+                                callback: (v) => '$' + v.toFixed(2),
                             },
                         },
                     },

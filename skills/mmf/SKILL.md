@@ -20,24 +20,25 @@ Make a numbered todo list covering all four phases before you start, then tick o
 
 ## Phase 0 — Startup & Ollama probe
 
-1. Log a startup banner so the user can see what's configured:
+1. Spawn a **Haiku agent** to call `ollama-local open_metrics_dashboard` (default port 8765). Log the returned URL so the user can open it. If the tool is unavailable, skip silently.
+
+2. Log a startup banner so the user can see what's configured:
    ```
    mmf (multi-model-flow) | planner: opus | worker: haiku | reviewer: sonnet
-   Tip: after the run, ask to open the metrics dashboard — the skill calls the
-   ollama-local open_metrics_dashboard tool, which serves http://localhost:8765.
+   Metrics dashboard: http://localhost:8765 (auto-started above)
    ```
 
-2. Spawn a **Haiku agent** whose sole job is to call the `ollama-local list_local_models` MCP tool and return the raw result.
+3. Spawn a **Haiku agent** whose sole job is to call the `ollama-local list_local_models` MCP tool and return the raw result.
 
-3. Determine OLLAMA_MODEL from that result:
+4. Determine OLLAMA_MODEL from that result:
    - **If a pinnedModel was passed**: if the result confirms Ollama is reachable (any non-ERROR line returned), use pinnedModel. If Ollama is offline, warn and fall back to null.
    - **Otherwise**: parse the model list (skip lines containing "ERROR" or the literal word "none"). Select with this priority: devstral (any variant) → qwen2.5-coder (any variant) → first model in the list → null.
 
-4. Log the outcome:
+5. Log the outcome:
    - Ollama available: update the banner — `worker: haiku + OLLAMA_MODEL`
    - Ollama offline: `Ollama not available — Worker will use Haiku for all generation`
 
-5. (Optional) If the user mentioned needing hardware recommendations or model selection, warn them first:
+6. (Optional) If the user mentioned needing hardware recommendations or model selection, warn them first:
    > ⚠ For an accurate recommendation, stop any loaded Ollama models before running llm-checker — a loaded model reduces available memory and causes llm-checker to suggest smaller models than your hardware can actually run. Run `ollama stop <model>` (check `ollama ps`), then re-run with the `[model:<name>]` flag once you've pulled the recommended model.
 
    Then spawn a Haiku agent to call `llm-checker recommend` with `category: coding` and surface the top suggestion.
