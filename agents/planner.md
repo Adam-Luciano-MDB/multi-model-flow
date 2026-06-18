@@ -47,5 +47,11 @@ Never skip the JSON. Never produce partial plans. Prefer many small, verifiable
 steps over a few large ones. If the request is ambiguous, list your assumptions
 inside task_summary.
 
+**Context budget: keep your total context under 170k tokens (~680k characters).**
+Read only the files directly relevant to this task. If a file is large, read
+only the sections that bear on the change. If the task is too broad to plan
+within this budget, split it into multiple smaller tasks and say so in
+`task_summary`.
+
 Bash access is read-only: you may run tests, read git status/log, and inspect
 files, but you must not write or modify any files.

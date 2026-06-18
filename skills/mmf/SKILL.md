@@ -1,7 +1,7 @@
 ---
 name: mmf
 description: Planner → Worker → Reviewer pipeline for cost-optimised coding. Opus plans, Haiku implements (+ local Ollama if available), Sonnet reviews.
-argument-hint: <task description> [auto] [model:<ollama-model>]
+argument-hint: <task description> [auto] [model:<ollama-model>] [ollama-only]
 allowed-tools: [Agent, TodoWrite]
 ---
 
@@ -13,6 +13,7 @@ Parse the arguments:
 - **task** — the full text, minus any flags below
 - **auto** — skip high-risk confirmation if `[auto]` appears anywhere in the text
 - **pinnedModel** — the model name inside `[model:X]` if present (e.g. `[model:devstral:latest]`)
+- **ollamaOnly** — set if `[ollama-only]` appears; bypasses the Haiku Worker and writes Ollama output directly to the target file
 
 Make a numbered todo list covering all four phases before you start, then tick off each item as you complete it.
 
@@ -91,23 +92,29 @@ Keep a running list of all files written across all steps.
 
 10. For each step in `plan.steps`, in order:
 
-    **a. Ollama pre-generation** (only if OLLAMA_MODEL is set):
+    **a. Ollama generation** (only if OLLAMA_MODEL is set):
     Spawn a **Haiku agent** that calls `ollama-local ask_local_model_for_code` with:
     - `prompt`: the step instruction
     - `language`: inferred from the target_file extension using this map — `.py`→Python, `.ts`/`.tsx`→TypeScript, `.js`/`.jsx`→JavaScript, `.go`→Go, `.rs`→Rust, `.java`→Java, `.rb`→Ruby, `.sh`→Bash, `.sql`→SQL, `.html`→HTML, `.css`→CSS
     - `model`: OLLAMA_MODEL
 
-    If the result does not start with "ERROR", store it as `ollamaContext` for the next sub-step.
+    If the result does not start with "ERROR", store it as `ollamaOutput`.
 
-    **b. Worker** — Spawn a **Worker agent** (`agentType: worker`) with this prompt:
-    > "You are the worker agent. Execute step STEP_ID from the plan below.
-    >
-    > Plan JSON: PLAN_JSON
-    >
-    > Execute ONLY step_id STEP_ID. Read all context_files first, then write the target file.
-    > [If ollamaContext exists: ] Ollama (OLLAMA_MODEL) has pre-generated an implementation for this step. Use it as your starting point — adapt imports, style, and conventions to match the existing codebase: OLLAMA_CONTEXT"
+    **b. Write step** — choose path based on flags:
 
-    Add any files the worker writes to the tracked list.
+    - **`ollamaOnly` is set AND `ollamaOutput` exists**: spawn a **Haiku agent** with the sole instruction to write `ollamaOutput` verbatim to `target_file` using the Write tool. No adaptation, no style changes. Log: `ollama-only: wrote OLLAMA_MODEL output directly to TARGET_FILE`.
+
+    - **`ollamaOnly` is set but Ollama was offline or returned an ERROR**: warn `⚠ [ollama-only] Ollama unavailable — falling back to Haiku Worker for step STEP_ID` and continue to the normal Worker below.
+
+    - **Otherwise (normal mode)**: spawn a **Worker agent** (`agentType: worker`) with this prompt:
+      > "You are the worker agent. Execute step STEP_ID from the plan below.
+      >
+      > Plan JSON: PLAN_JSON
+      >
+      > Execute ONLY step_id STEP_ID. Read all context_files first, then write the target file.
+      > [If ollamaOutput exists: ] Ollama (OLLAMA_MODEL) has pre-generated an implementation for this step. Use it as your starting point — adapt imports, style, and conventions to match the existing codebase: OLLAMA_OUTPUT"
+
+    Add any files written to the tracked list.
 
     **c. Error check** — if the worker reports `{"error": ...}` or missing context: stop execution, tell the user exactly what context is missing, and ask them to provide it before re-running.
 

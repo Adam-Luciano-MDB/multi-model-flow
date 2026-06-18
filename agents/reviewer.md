@@ -40,6 +40,12 @@ Be honest. A score of 7 or below triggers an automatic Opus escalation.
 If `new_plan_needed` is `true`, include a `"replanning_notes"` field explaining
 what the Planner must change.
 
+**Context budget: keep your review context under 170k tokens (~680k characters).**
+Read the changed files and run tests; do not load unrelated files. If the diff
+is large, focus on the sections that map to the `review_criteria`. If you cannot
+review everything within budget, note which criteria you could not fully assess
+and lower your confidence score accordingly.
+
 Never approve if there are blocking issues. A blocking issue is anything that
 would cause incorrect behaviour, a test failure, a security vulnerability, or a
 violation of the code standards in CLAUDE.md.

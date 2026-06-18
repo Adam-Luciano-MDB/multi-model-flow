@@ -160,7 +160,7 @@ User task description
 | Plan (self-check)  | Planner  | `opus`           | When Fable unavailable and plan confidence < 7/10           |
 | Execute (probe)    | —        | `haiku`          | Once per run — checks if Ollama is running and picks model  |
 | Execute (generate) | —        | Ollama (auto)    | Per step when Ollama available — pre-generates code via MCP |
-| Execute (write)    | Worker   | `haiku`          | Per step — adapts Ollama output, writes files, signals done |
+| Execute (write)    | Worker   | `haiku`          | Per step — adapts Ollama output, writes files, signals done. Skipped when `[ollama-only]` is set and Ollama is available |
 | Review             | Reviewer | `sonnet`         | Always — quality bar without Opus cost                      |
 | Review (escalate)  | Reviewer | `opus`           | When Sonnet confidence < 8/10 — independent second opinion  |
 
@@ -309,6 +309,7 @@ All supported flags (placed anywhere in the argument text):
 | _(plain text)_   | —       | The development task description (required)          |
 | `[auto]`         | off     | Skip the high-risk plan confirmation halt            |
 | `[model:<name>]` | —       | Pin a specific Ollama model; skips the auto-probe    |
+| `[ollama-only]`  | off     | Write Ollama output directly to file; bypasses the Haiku Worker's adaptation step. Falls back to Haiku if Ollama is offline. |
 
 In auto mode a high-risk plan is logged and executed instead of halting. Use it
 deliberately — the confirmation step exists to catch destructive plans before
