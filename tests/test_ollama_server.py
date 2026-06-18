@@ -269,3 +269,38 @@ class TestGetMetricsSummary:
             result = server.get_metrics_summary()
         assert result == "sentinel output"
         mock_fn.assert_called_once()
+
+
+class TestOpenMetricsDashboard:
+    def test_reuses_existing_server_without_spawning(self):
+        with patch.object(server, "_port_is_open", return_value=True), \
+             patch("subprocess.Popen") as popen:
+            result = server.open_metrics_dashboard(8765)
+        assert "already running" in result
+        assert "http://127.0.0.1:8765" in result
+        popen.assert_not_called()
+
+    def test_spawns_detached_dashboard_when_port_free(self):
+        # First check: free -> spawn. Readiness loop: open -> return.
+        with patch.object(server, "_port_is_open", side_effect=[False, True]), \
+             patch("subprocess.Popen") as popen:
+            result = server.open_metrics_dashboard(8765)
+        assert "started at http://127.0.0.1:8765" in result
+        popen.assert_called_once()
+        # Detached so the dashboard outlives the MCP server.
+        assert popen.call_args.kwargs.get("start_new_session") is True
+
+    def test_returns_error_when_ui_script_missing(self):
+        with patch.object(server, "_port_is_open", return_value=False), \
+             patch("os.path.exists", return_value=False), \
+             patch("subprocess.Popen") as popen:
+            result = server.open_metrics_dashboard(8765)
+        assert result.startswith("ERROR")
+        popen.assert_not_called()
+
+    def test_reports_error_when_spawn_fails(self):
+        with patch.object(server, "_port_is_open", return_value=False), \
+             patch("os.path.exists", return_value=True), \
+             patch("subprocess.Popen", side_effect=OSError("boom")):
+            result = server.open_metrics_dashboard(8765)
+        assert result.startswith("ERROR")

@@ -23,8 +23,8 @@ Make a numbered todo list covering all four phases before you start, then tick o
 1. Log a startup banner so the user can see what's configured:
    ```
    mmf (multi-model-flow) | planner: opus | worker: haiku | reviewer: sonnet
-   Tip: after the run, launch the dashboard from the multi-model-flow install
-   directory with  scripts/show_metrics_ui.sh  (serves http://localhost:8765).
+   Tip: after the run, ask to open the metrics dashboard — the skill calls the
+   ollama-local open_metrics_dashboard tool, which serves http://localhost:8765.
    ```
 
 2. Spawn a **Haiku agent** whose sole job is to call the `ollama-local list_local_models` MCP tool and return the raw result.
@@ -149,7 +149,9 @@ Keep a running list of all files written across all steps.
     - `outcome`: the final verdict string (e.g. `"approved"`, `"approved_with_notes"`, `"rejected_no_replan"`, `"high_risk"`, `"execution_failed"`)
     - `metadata_json`: a JSON string — `{"task":"<first 80 chars of task>","steps_planned":N,"files_written":N,"retries":N,"ollama_model":"<model or empty string>","claude_calls":{"opus":N,"fable":N,"sonnet":N,"haiku":N}}`
 
-16. Log the completion line:
+16. Spawn a **Haiku agent** to call the `ollama-local open_metrics_dashboard` tool, then log its returned URL:
     ```
-    Done. View metrics: run scripts/show_metrics_ui.sh from the multi-model-flow install dir (http://localhost:8765).
+    Done. Metrics dashboard: http://localhost:8765 (read-only). For a text summary, ask: "Use the ollama-local get_metrics_summary tool."
     ```
+    If the `open_metrics_dashboard` tool is unavailable (Ollama MCP not installed), fall back to logging:
+    `Done. View metrics by running scripts/show_metrics_ui.sh from the plugin directory.`

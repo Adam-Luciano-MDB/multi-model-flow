@@ -347,6 +347,7 @@ to use** above.
 - `ask_local_model_for_code(prompt, context, language, model)` — code-optimised wrapper (auto-selects a model when `model` is omitted)
 - `log_event` — append a metrics record to `metrics.jsonl`
 - `get_metrics_summary` — print the CLI metrics summary
+- `open_metrics_dashboard` — start the web dashboard (background, 127.0.0.1:8765) and return its URL; works regardless of where the plugin is installed
 
 **Pinning a model for a single run.** Use the `[model:<name>]` flag to skip the
 auto-probe and use a specific model:
@@ -454,15 +455,30 @@ for exact billing.
 
 ### View metrics in a web dashboard
 
-For interactive exploration of workflow runs and per-model latency metrics, start
-the metrics UI server:
+For interactive exploration of workflow runs and per-model latency metrics, open
+the dashboard. The easiest way works from anywhere — just ask Claude:
+
+```
+Use the ollama-local open_metrics_dashboard tool.
+```
+
+This starts a read-only server in the background on `http://127.0.0.1:8765` and
+returns the URL. It resolves the bundled UI relative to the plugin, so you don't
+need to know where the plugin is installed. If a server is already running on the
+port, it reuses it. (The `/mmf` skill calls this automatically at the end of a run.)
+
+To stop it later:
+
+```bash
+lsof -ti tcp:8765 | xargs kill
+```
+
+Alternatively, if you have the repo checked out, launch it directly (pass
+`--port <number>` to change the port):
 
 ```bash
 bash scripts/show_metrics_ui.sh
 ```
-
-By default this launches a read-only dashboard on `http://127.0.0.1:8765`. Pass
-`--port <number>` to use a different port.
 
 The dashboard displays:
 - **Summary cards** — total runs, average retries, Ollama call count, approximate

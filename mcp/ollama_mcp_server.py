@@ -237,5 +237,61 @@ def get_metrics_summary() -> str:
     return _metrics.summarize()
 
 
+def _port_is_open(port: int, host: str = "127.0.0.1", timeout: float = 0.3) -> bool:
+    """True if something is already listening on host:port."""
+    import socket
+
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
+        sock.settimeout(timeout)
+        return sock.connect_ex((host, port)) == 0
+
+
+@mcp.tool()
+def open_metrics_dashboard(port: int = 8765) -> str:
+    """
+    Start the read-only metrics dashboard and return its URL.
+
+    Launches the bundled metrics_ui.py as a background process bound to
+    127.0.0.1, so it works no matter where the plugin is installed (no need to
+    know the install directory). If a server is already listening on the port,
+    returns the existing URL instead of starting a second one.
+
+    Args:
+        port: Port to serve on (default 8765).
+    """
+    import subprocess
+    import time as _time
+
+    url = f"http://127.0.0.1:{port}"
+    if _port_is_open(port):
+        return f"Metrics dashboard already running at {url}"
+
+    ui_script = os.path.join(os.path.dirname(os.path.abspath(__file__)), "metrics_ui.py")
+    if not os.path.exists(ui_script):
+        return f"ERROR: metrics_ui.py not found at {ui_script}"
+
+    try:
+        subprocess.Popen(
+            [sys.executable, ui_script, "--port", str(port)],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            start_new_session=True,  # detach so the dashboard outlives this server
+        )
+    except Exception as e:
+        return f"ERROR: could not start dashboard: {e}"
+
+    # Give it a moment to bind so the user doesn't hit connection-refused.
+    for _ in range(20):
+        if _port_is_open(port):
+            break
+        _time.sleep(0.1)
+
+    return (
+        f"Metrics dashboard started at {url} (read-only, local-only). "
+        "Open it in your browser. It keeps running in the background; "
+        f"stop it with:  lsof -ti tcp:{port} | xargs kill"
+    )
+
+
 if __name__ == "__main__":
     mcp.run()
