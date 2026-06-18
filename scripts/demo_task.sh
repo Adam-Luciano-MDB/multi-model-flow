@@ -3,9 +3,9 @@ set -euo pipefail
 
 DEMO_TASK="Create a small utility module with a function that parses a CSV string into a list of records, plus unit tests for it."
 
-echo "=== Planner-Worker-Reviewer: Demo ==="
+echo "=== multi-model-flow: Demo ==="
 echo ""
-echo "This demo runs the full three-phase workflow on a safe, self-contained task:"
+echo "This demo runs the full three-phase skill on a safe, self-contained task:"
 echo ""
 echo "  Task: $DEMO_TASK"
 echo ""
@@ -17,11 +17,11 @@ echo ""
 echo "This is the AUTONOMOUS path: it runs unattended via 'claude --print' and"
 echo "passes auto mode so it won't pause even on a high-risk plan."
 echo "For a hands-on run, use the interactive slash command instead (see README):"
-echo "  /dev-task-workflow $DEMO_TASK"
+echo "  /multi-model-flow $DEMO_TASK"
 echo ""
 echo "Starting in 3 seconds... (Ctrl-C to cancel)"
 sleep 3
 echo ""
 
 claude --print \
-  "Use the dev-task-workflow with auto mode enabled (auto: true) and task: $DEMO_TASK"
+  "Use the multi-model-flow skill in auto mode on this task: $DEMO_TASK"

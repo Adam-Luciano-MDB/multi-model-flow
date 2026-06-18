@@ -22,10 +22,19 @@ python3.11 -m pip install -r "$PROJECT_ROOT/mcp/requirements.txt" 2>/dev/null \
 echo "      Done."
 echo ""
 
-# 2. Register the Ollama MCP server with Claude Code
-echo "[2/3] Registering ollama-local MCP server with Claude Code..."
-claude mcp add "ollama-local" --transport stdio -- python "$PROJECT_ROOT/mcp/ollama_mcp_server.py"
-echo "      Done."
+# 2. Register the Ollama MCP server with Claude Code.
+#    Skipped under --global: the plugin ships .mcp.json, which registers
+#    ollama-local automatically when the plugin is installed. Registering it
+#    here too would create a duplicate server of the same name.
+if [ "$GLOBAL" = true ]; then
+    echo "[2/3] Skipping manual ollama-local registration — the plugin's .mcp.json"
+    echo "      registers it automatically. (Run without --global to register it"
+    echo "      standalone for project-mode use.)"
+else
+    echo "[2/3] Registering ollama-local MCP server with Claude Code..."
+    claude mcp add "ollama-local" --transport stdio -- python3 "$PROJECT_ROOT/mcp/ollama_mcp_server.py"
+    echo "      Done."
+fi
 echo ""
 
 # 3. Install llm-checker and register its MCP server
@@ -42,24 +51,18 @@ else
 fi
 echo ""
 
-# Optional: install the skill + agents globally so /multi-model-flow works in any project.
-# Uses symlinks (not copies) so a future `git pull` propagates changes automatically
-# without re-running this script.
+# Optional: install this clone as a plugin so /multi-model-flow works in any project.
+# A single symlink of the repo into ~/.claude/plugins/ exposes everything the plugin
+# ships — the skill (skills/), the agents (agents/), and the Ollama MCP server
+# (.mcp.json). Because it's a symlink (not a copy), a future `git pull` propagates
+# updates automatically without re-running this script.
 if [ "$GLOBAL" = true ]; then
-    echo "[+] Installing /multi-model-flow globally to ~/.claude/ (symlinks) ..."
-    mkdir -p ~/.claude/agents ~/.claude/plugins
-
-    # Agent symlinks — planner/worker/reviewer are referenced by agentType in the skill
-    ln -sf "$PROJECT_ROOT/.claude/agents/planner.md"  ~/.claude/agents/
-    ln -sf "$PROJECT_ROOT/.claude/agents/worker.md"   ~/.claude/agents/
-    ln -sf "$PROJECT_ROOT/.claude/agents/reviewer.md" ~/.claude/agents/
-
-    # Plugin directory symlink — exposes skills/multi-model-flow/SKILL.md as /multi-model-flow
-    # and makes the plugin visible in /plugin list
+    echo "[+] Installing /multi-model-flow as a plugin (~/.claude/plugins/, symlink) ..."
+    mkdir -p ~/.claude/plugins
     ln -sf "$PROJECT_ROOT" ~/.claude/plugins/multi-model-flow
-
-    echo "      Done — /multi-model-flow is now available in all Claude Code projects."
-    echo "      Symlinked, not copied: git pull in the repo updates the global install automatically."
+    echo "      Done — /multi-model-flow, its agents, and the ollama-local MCP"
+    echo "      server are now available in all Claude Code projects."
+    echo "      Symlinked, not copied: git pull in the repo updates it automatically."
     echo ""
 fi
 

@@ -2,7 +2,7 @@
 name: multi-model-flow
 description: Planner → Worker → Reviewer pipeline for cost-optimised coding. Opus plans, Haiku implements (+ local Ollama if available), Sonnet reviews.
 argument-hint: <task description> [auto] [model:<ollama-model>]
-allowed-tools: [Agent]
+allowed-tools: [Agent, TodoWrite]
 ---
 
 Run the **multi-model-flow** three-phase pipeline for this task:
@@ -23,7 +23,8 @@ Make a numbered todo list covering all four phases before you start, then tick o
 1. Log a startup banner so the user can see what's configured:
    ```
    multi-model-flow | planner: opus | worker: haiku | reviewer: sonnet
-   Tip: run  python mcp/metrics_ui.py  after the workflow to view the metrics dashboard.
+   Tip: after the run, launch the dashboard from the multi-model-flow install
+   directory with  scripts/show_metrics_ui.sh  (serves http://localhost:8765).
    ```
 
 2. Spawn a **Haiku agent** whose sole job is to call the `ollama-local list_local_models` MCP tool and return the raw result.
@@ -147,5 +148,5 @@ Keep a running list of all files written across all steps.
 
 16. Log the completion line:
     ```
-    Done. View metrics: python mcp/metrics_ui.py  (http://localhost:8765)
+    Done. View metrics: run scripts/show_metrics_ui.sh from the multi-model-flow install dir (http://localhost:8765).
     ```

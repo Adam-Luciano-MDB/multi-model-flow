@@ -23,23 +23,29 @@ Drop it into any codebase; it is framework and language agnostic.
 ## Quickstart
 
 > **Ollama is zero-config.** If Ollama is running and has any model pulled,
-> the workflow detects and uses it automatically. No registration or wiring
+> the skill detects and uses it automatically. No registration or wiring
 > needed — just `ollama serve` and it works.
 
-> **`/multi-model-flow` is a standard Claude Code skill.** Install it globally
-> with `./scripts/setup_mcp.sh --global` — this **symlinks** the skill and
-> agents into `~/.claude/` so `/multi-model-flow` works in every project, and a
-> future `git pull` propagates updates automatically. The repo is registered as
-> a Claude Code plugin so it shows up in `/plugin list`.
+`multi-model-flow` is packaged as a **Claude Code plugin**: a slash-command skill
+(`skills/`), three sub-agents (`agents/`), and the `ollama-local` MCP server
+(`.mcp.json`) all ship together. Installing the plugin makes `/multi-model-flow`
+available in every project and registers the Ollama MCP server automatically.
 
 ```bash
-# 1. Install MCP servers + dependencies
-#    Add --global to symlink the skill into ~/.claude/ so it works in every project
-./scripts/setup_mcp.sh
+# 1. Install Python deps and (with --global) the plugin itself.
+#    --global symlinks this repo into ~/.claude/plugins/ so the skill, agents,
+#    and ollama-local MCP server are available in every project. Because it's a
+#    symlink, a future `git pull` propagates updates with no re-install.
+./scripts/setup_mcp.sh --global
 
 # 2. Restart Claude Code, then in an interactive session run the demo task:
 #    (no Ollama model required — Worker falls back to Haiku)
 ```
+
+> The MCP server runs on the `python3` found on your PATH and needs `fastmcp`
+> and `httpx`. `setup_mcp.sh` installs them; if `claude mcp list` shows
+> `ollama-local` failing to start, run
+> `python3 -m pip install -r mcp/requirements.txt`.
 
 In Claude Code, type:
 
@@ -218,18 +224,18 @@ GPU-aware recommendations and keeping models up to date.
 # 1. Make scripts executable
 chmod +x scripts/setup_mcp.sh scripts/demo_task.sh
 
-# 2. Install MCP dependencies and register both MCP servers
-#    (requires Python 3.10+ and Node.js 16+)
-#    Pass --global to symlink the skill into ~/.claude/ — makes /multi-model-flow
-#    available in every project and auto-updates when you git pull this repo.
-./scripts/setup_mcp.sh
+# 2. Install Python deps, install llm-checker, and install the plugin globally
+#    (requires Python 3.10+ and Node.js 16+). --global symlinks this repo into
+#    ~/.claude/plugins/, which exposes the skill, the agents, and the
+#    ollama-local MCP server (via the bundled .mcp.json) in every project.
+./scripts/setup_mcp.sh --global
 
-# 3. (Optional) start Ollama — the workflow auto-detects it, no config needed:
+# 3. (Optional) start Ollama — the skill auto-detects it, no config needed:
 ollama serve &
 ollama pull qwen2.5-coder:7b   # or use llm-checker to find the best model for your hardware
 # See "Prerequisites → Finding a model" and "Model selection with llm-checker" below.
 
-# 4. Restart Claude Code to pick up the new MCP servers
+# 4. Restart Claude Code to pick up the plugin and its MCP server
 
 # 5. Edit CLAUDE.md — fill in Project, Tech stack, and Project structure
 ```
@@ -263,25 +269,25 @@ The workflow:
 ### Autonomous mode (unattended)
 
 To run end-to-end without the high-risk confirmation halt — for CI, scripts, or
-when you trust the task — enable auto mode:
+when you trust the task — add the `[auto]` flag:
 
 ```
-/multi-model-flow with auto mode (auto: true): <your task>
+/multi-model-flow [auto] <your task>
 ```
 
 Or non-interactively from a script (this is what `./scripts/demo_task.sh` does):
 
 ```bash
-claude --print "Use the multi-model-flow with auto mode enabled (auto: true) and task: <your task>"
+claude --print "Use the multi-model-flow skill in auto mode on this task: <your task>"
 ```
 
-All supported args:
+All supported flags (placed anywhere in the argument text):
 
-| Arg           | Type    | Default | Purpose                                               |
-|---------------|---------|---------|-------------------------------------------------------|
-| `task`        | string  | —       | The development task description (required)           |
-| `auto`        | boolean | false   | Skip high-risk plan confirmation halt                 |
-| `ollamaModel` | string  | —       | Pin a specific Ollama model; skips the auto-probe     |
+| Flag             | Default | Purpose                                              |
+|------------------|---------|------------------------------------------------------|
+| _(plain text)_   | —       | The development task description (required)          |
+| `[auto]`         | off     | Skip the high-risk plan confirmation halt            |
+| `[model:<name>]` | —       | Pin a specific Ollama model; skips the auto-probe    |
 
 In auto mode a high-risk plan is logged and executed instead of halting. Use it
 deliberately — the confirmation step exists to catch destructive plans before
@@ -304,11 +310,11 @@ Use the reviewer agent with this plan JSON and these files: [list files]
 
 ### Ollama (automatic local generation)
 
-Ollama is used automatically — no configuration required. At the start of every
-Execute phase the workflow probes `list_local_models`. If a model is found, it
-calls `ask_local_model_for_code` for each step and passes the result to the
-Haiku Worker as a starting point. If Ollama is offline or has no models, the
-Worker falls back to Haiku-only generation silently.
+Ollama is used automatically — no configuration required. Once at the start of
+each run the skill probes `list_local_models`. If a model is found, it calls
+`ask_local_model_for_code` for each step and passes the result to the Haiku
+Worker as a starting point. If Ollama is offline or has no models, the Worker
+falls back to Haiku-only generation silently.
 
 To get Ollama running with a good model, see **Prerequisites → Finding a model
 to use** above.
@@ -317,20 +323,15 @@ to use** above.
 - `recommend_model` — RAM-based fallback recommender (no Node.js required)
 - `list_local_models` — see what models are pulled locally
 - `ask_local_model(model, prompt, system)` — raw generation
-- `ask_local_model_for_code(prompt, context, language)` — code-optimised wrapper
+- `ask_local_model_for_code(prompt, context, language, model)` — code-optimised wrapper (auto-selects a model when `model` is omitted)
 - `log_event` — append a metrics record to `metrics.jsonl`
 - `get_metrics_summary` — print the CLI metrics summary
 
-**Pinning a model for a single run.** Pass `ollamaModel` as a workflow arg to
-skip the auto-probe and use a specific model:
+**Pinning a model for a single run.** Use the `[model:<name>]` flag to skip the
+auto-probe and use a specific model:
 
 ```
-/multi-model-flow with ollamaModel: devstral:latest — Add a rate limiter to /api/v2
-```
-
-Or via the Workflow tool directly:
-```js
-Workflow({ name: "multi-model-flow", args: { task: "...", ollamaModel: "devstral:latest" } })
+/multi-model-flow [model:devstral:latest] Add a rate limiter to /api/v2
 ```
 
 **Setting a persistent default.** To always use a specific model without
@@ -342,11 +343,11 @@ passing the arg each time, set it via an environment variable:
 | `OLLAMA_BASE_URL`      | `http://localhost:11434`  | Ollama endpoint                                               |
 | `OLLAMA_TIMEOUT`       | `1500`                   | Generation timeout in seconds (default 25 min)                |
 
-> **Note:** `OLLAMA_DEFAULT_MODEL` is a server-side default, not what the
-> workflow probe uses. The probe picks the **first model returned by
-> `list_local_models`**. To control which model the workflow uses, pass
-> `ollamaModel` as a run arg (see above) or make sure the model you want is
-> the only one — or the first one — pulled locally.
+> **Note:** `OLLAMA_DEFAULT_MODEL` is a server-side default for the
+> `ask_local_model` tool, not what the skill's probe uses. The probe selects a
+> model by priority: **devstral** (any variant), then **qwen2.5-coder** (any
+> variant), then the **first model** `list_local_models` returns. To force a
+> specific model for a run, pass `[model:<name>]` (see above).
 
 For a hardware-aware recommendation across 229+ models, use the `llm-checker`
 MCP server (see **Model selection with llm-checker** below).
@@ -371,7 +372,7 @@ the project root (gitignored, append-only JSONL):
 | Event | Source | What's captured |
 |-------|--------|-----------------|
 | `ollama_call` | Python MCP server | model, latency (ms), prompt/response size, outcome |
-| `workflow` | Workflow JS via `log_event` | task preview, steps planned, files written, retries, verdict, ollama_model |
+| `workflow` | Skill via `log_event` | task preview, steps planned, files written, retries, verdict, ollama_model, per-tier Claude call counts |
 
 Each record: `{"ts": <unix float>, "phase": "...", "model": "...", "outcome": "...", "meta": {...}}`
 
@@ -412,9 +413,17 @@ Total: 18 calls
 Approx tokens in:  48,000  (from 192,000 chars)
 Approx tokens out: 12,000  (from  48,000 chars)
 
-Note: Anthropic API calls (Opus/Sonnet/Haiku) are not tracked here.
-Use the Claude Console for cost reporting on those tiers.
+=== Claude API Calls (estimated) ===
+  opus          4 call(s)  ~$0.760
+  sonnet        4 call(s)  ~$0.240
+  haiku        26 call(s)  ~$0.130
+  Total              ~$1.130  (rough estimate)
+  Costs estimated from call counts × typical prompt sizes.
 ```
+
+Claude API cost is **estimated** from per-tier call counts × typical prompt
+sizes (not real token counts). Use the [Claude Console](https://console.anthropic.com)
+for exact billing.
 
 **What the metrics tell you:**
 - `steps_planned` vs `files_written` — if files < steps, some steps wrote nothing (check worker output)
@@ -435,14 +444,15 @@ By default this launches a read-only dashboard on `http://127.0.0.1:8765`. Pass
 `--port <number>` to use a different port.
 
 The dashboard displays:
-- **Workflow summary cards** — total runs, outcome distribution, average retries,
-  recent task descriptions
+- **Summary cards** — total runs, average retries, Ollama call count, approximate
+  tokens in/out, Claude call count with estimated cost, and estimated Ollama
+  savings (what those local calls would have cost on Haiku)
 - **Outcome breakdown** — doughnut chart of approved vs approved_with_notes vs rejected
 - **Per-model performance** — bar chart and table of Ollama model calls, average
   latencies, and error counts
-- **Token usage** — approximate tokens consumed in/out (derived from character counts)
-- **Recent runs table** — last 10 workflow executions with timestamps, outcomes, and
-  file/step counts
+- **Claude API usage (estimated)** — per-tier call counts and estimated cost, with
+  the Ollama-offload savings called out
+- **Recent runs table** — last 10 runs with timestamps, outcomes, and file/step counts
 
 The UI is read-only (no writes to metrics.jsonl) and local-only (binds to 127.0.0.1).
 
@@ -640,27 +650,31 @@ ERROR: Ollama is not running. Start it with `ollama serve`.
 ```
 
 Run `ollama serve` in a terminal (or configure it as a system service). The
-workflow probes Ollama once at the start of each Execute phase — if it's
-offline the probe silently falls back to Haiku-only generation. No manual
-intervention required.
+skill probes Ollama once at the start of each run — if it's offline the probe
+silently falls back to Haiku-only generation. No manual intervention required.
 
 ### Ollama is detected but code generation looks wrong
 
-The probe picks the first model returned by `list_local_models`. If that model
-is not suited for coding (e.g. a general-purpose model), pin a better one:
+The probe prefers devstral, then qwen2.5-coder, then the first model
+`list_local_models` returns. If the selected model is not suited for coding,
+pin a better one for the run:
 
-```bash
-export OLLAMA_DEFAULT_MODEL=qwen2.5-coder:7b
+```
+/multi-model-flow [model:qwen2.5-coder:7b] <your task>
 ```
 
 The Haiku Worker always adapts and overwrites poor Ollama output, so a
-mismatched model degrades quality but never breaks the workflow.
+mismatched model degrades quality but never breaks the run.
 
 ### MCP server not connecting
 
 1. Check it was registered: `claude mcp list`
-2. If missing, re-run `./scripts/setup_mcp.sh`
-3. Restart Claude Code after registering
+2. If missing: when installed as a plugin, the bundled `.mcp.json` registers
+   `ollama-local` automatically — just restart Claude Code. For a standalone
+   (non-plugin) clone, re-run `./scripts/setup_mcp.sh`.
+3. Confirm the Python deps are installed: `python3 -m pip install -r mcp/requirements.txt`
+   (the MCP server needs `fastmcp` and `httpx` on the `python3` that launches it)
+4. Restart Claude Code after registering
 
 ### Reviewer rejects in a loop
 
@@ -670,12 +684,12 @@ The workflow caps retries at 2. If it still fails:
 3. Re-run: `Use the multi-model-flow with task: [revised description]`
 
 If the reviewer is overly strict for your project, edit
-`.claude/agents/reviewer.md` and loosen the blocking criteria.
+`agents/reviewer.md` and loosen the blocking criteria.
 
 ### Worker outputs markdown fences instead of raw file content
 
 The worker prompt explicitly instructs it not to do this. If a model ignores
-the instruction, add this line to `.claude/agents/worker.md`:
+the instruction, add this line to `agents/worker.md`:
 ```
 CRITICAL: Never wrap file output in markdown code fences (``` or ~~~).
 ```
