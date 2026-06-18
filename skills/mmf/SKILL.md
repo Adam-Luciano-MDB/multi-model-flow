@@ -1,5 +1,5 @@
 ---
-name: multi-model-flow
+name: mmf
 description: Planner → Worker → Reviewer pipeline for cost-optimised coding. Opus plans, Haiku implements (+ local Ollama if available), Sonnet reviews.
 argument-hint: <task description> [auto] [model:<ollama-model>]
 allowed-tools: [Agent, TodoWrite]
@@ -22,7 +22,7 @@ Make a numbered todo list covering all four phases before you start, then tick o
 
 1. Log a startup banner so the user can see what's configured:
    ```
-   multi-model-flow | planner: opus | worker: haiku | reviewer: sonnet
+   mmf (multi-model-flow) | planner: opus | worker: haiku | reviewer: sonnet
    Tip: after the run, launch the dashboard from the multi-model-flow install
    directory with  scripts/show_metrics_ui.sh  (serves http://localhost:8765).
    ```
@@ -37,7 +37,10 @@ Make a numbered todo list covering all four phases before you start, then tick o
    - Ollama available: update the banner — `worker: haiku + OLLAMA_MODEL`
    - Ollama offline: `Ollama not available — Worker will use Haiku for all generation`
 
-5. (Optional) If the user mentioned needing hardware recommendations or model selection, spawn a Haiku agent to call `llm-checker recommend` with `category: coding` and surface the top suggestion before proceeding.
+5. (Optional) If the user mentioned needing hardware recommendations or model selection, warn them first:
+   > ⚠ For an accurate recommendation, stop any loaded Ollama models before running llm-checker — a loaded model reduces available memory and causes llm-checker to suggest smaller models than your hardware can actually run. Run `ollama stop <model>` (check `ollama ps`), then re-run with the `[model:<name>]` flag once you've pulled the recommended model.
+
+   Then spawn a Haiku agent to call `llm-checker recommend` with `category: coding` and surface the top suggestion.
 
 ---
 

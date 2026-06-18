@@ -1,6 +1,8 @@
 {
-  "ollama-local": {
-    "command": "python3",
-    "args": ["${CLAUDE_PLUGIN_ROOT}/mcp/ollama_mcp_server.py"]
+  "mcpServers": {
+    "ollama-local": {
+      "command": "python3",
+      "args": ["${CLAUDE_PLUGIN_ROOT}/mcp/ollama_mcp_server.py"]
+    }
   }
 }

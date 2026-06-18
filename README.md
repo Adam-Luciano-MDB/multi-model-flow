@@ -28,7 +28,7 @@ Drop it into any codebase; it is framework and language agnostic.
 
 `multi-model-flow` is packaged as a **Claude Code plugin**: a slash-command skill
 (`skills/`), three sub-agents (`agents/`), and the `ollama-local` MCP server
-(`.mcp.json`) all ship together. Installing the plugin makes `/multi-model-flow`
+(`.mcp.json`) all ship together. Installing the plugin makes `/mmf`
 available in every project and registers the Ollama MCP server automatically.
 
 ```bash
@@ -50,7 +50,7 @@ available in every project and registers the Ollama MCP server automatically.
 In Claude Code, type:
 
 ```
-/multi-model-flow Create a CSV parser utility with unit tests.
+/mmf Create a CSV parser utility with unit tests.
 ```
 
 You'll watch Opus plan → (Fable/Opus validates if plan confidence < 7) →
@@ -199,8 +199,12 @@ hardware. It is installed and registered automatically by the setup script:
 ./scripts/setup_mcp.sh   # installs llm-checker globally and registers it with Claude Code
 ```
 
-After running setup and **restarting Claude Code**, ask Claude to recommend
-the best model for your hardware:
+After running setup and **restarting Claude Code**, stop Ollama first so its
+memory usage doesn't skew the recommendation, then ask Claude:
+
+```bash
+ollama stop $(ollama ps --format '{{.Name}}' 2>/dev/null | head -1)  # stop any loaded model
+```
 
 ```
 Use the llm-checker recommend tool with category: coding.
@@ -249,7 +253,7 @@ ollama pull qwen2.5-coder:7b   # or use llm-checker to find the best model for y
 In an interactive Claude Code session, invoke it as a slash command:
 
 ```
-/multi-model-flow Add a rate-limiting middleware to the /api/v2 routes that
+/mmf Add a rate-limiting middleware to the /api/v2 routes that
 caps requests at 100/minute per IP.
 ```
 
@@ -272,7 +276,7 @@ To run end-to-end without the high-risk confirmation halt — for CI, scripts, o
 when you trust the task — add the `[auto]` flag:
 
 ```
-/multi-model-flow [auto] <your task>
+/mmf [auto] <your task>
 ```
 
 Or non-interactively from a script (this is what `./scripts/demo_task.sh` does):
@@ -331,7 +335,7 @@ to use** above.
 auto-probe and use a specific model:
 
 ```
-/multi-model-flow [model:devstral:latest] Add a rate limiter to /api/v2
+/mmf [model:devstral:latest] Add a rate limiter to /api/v2
 ```
 
 **Setting a persistent default.** To always use a specific model without
@@ -478,6 +482,12 @@ Returns CPU, GPU inventory, total RAM, memory bandwidth, and acceleration backen
 Run this once so you know what you're working with.
 
 **2. Get a coding-optimised recommendation**
+
+> **Stop Ollama before running this.** If Ollama has a model loaded it keeps it
+> in memory, which reduces the available memory reported to llm-checker and
+> causes it to recommend smaller models than your hardware can actually run.
+> Run `ollama stop <model>` (or `pkill ollama`) before step 2, then restart
+> Ollama after you've pulled the recommended model.
 
 ```
 Use the llm-checker recommend tool with category: coding.
@@ -660,7 +670,7 @@ The probe prefers devstral, then qwen2.5-coder, then the first model
 pin a better one for the run:
 
 ```
-/multi-model-flow [model:qwen2.5-coder:7b] <your task>
+/mmf [model:qwen2.5-coder:7b] <your task>
 ```
 
 The Haiku Worker always adapts and overwrites poor Ollama output, so a
@@ -724,7 +734,7 @@ underspecified. Options:
 - Include specific file paths or function names in your task description
 - Break the task into smaller, well-scoped sub-tasks
 - Lower the threshold by editing the `confidence < 7` check in
-  `skills/multi-model-flow/SKILL.md`
+  `skills/mmf/SKILL.md`
 
 If Fable is unavailable in your Claude Code plan, Opus self-validates instead —
 this costs an extra Opus call but produces the same strengthening effect.
@@ -736,4 +746,4 @@ or the tasks you're running are unusually broad. Options:
 - Tighten the task description so the scope is clear
 - Add more context to `CLAUDE.md` (tech stack, constraints, test conventions)
 - Raise the escalation threshold by editing the `confidence < 8` check in
-  `skills/multi-model-flow/SKILL.md`
+  `skills/mmf/SKILL.md`

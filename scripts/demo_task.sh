@@ -17,7 +17,7 @@ echo ""
 echo "This is the AUTONOMOUS path: it runs unattended via 'claude --print' and"
 echo "passes auto mode so it won't pause even on a high-risk plan."
 echo "For a hands-on run, use the interactive slash command instead (see README):"
-echo "  /multi-model-flow $DEMO_TASK"
+echo "  /mmf $DEMO_TASK"
 echo ""
 echo "Starting in 3 seconds... (Ctrl-C to cancel)"
 sleep 3
