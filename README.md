@@ -33,7 +33,7 @@ Drop it into any codebase; it is framework and language agnostic.
 In Claude Code, type:
 
 ```
-/dev-task-workflow Create a CSV parser utility with unit tests.
+/multi-model-flow Create a CSV parser utility with unit tests.
 ```
 
 You'll watch Opus plan → (Fable/Opus validates if plan confidence < 7) →
@@ -230,7 +230,7 @@ ollama pull qwen2.5-coder:7b   # or use llm-checker to find the best model for y
 In an interactive Claude Code session, invoke it as a slash command:
 
 ```
-/dev-task-workflow Add a rate-limiting middleware to the /api/v2 routes that
+/multi-model-flow Add a rate-limiting middleware to the /api/v2 routes that
 caps requests at 100/minute per IP.
 ```
 
@@ -253,13 +253,13 @@ To run end-to-end without the high-risk confirmation halt — for CI, scripts, o
 when you trust the task — enable auto mode:
 
 ```
-/dev-task-workflow with auto mode (auto: true): <your task>
+/multi-model-flow with auto mode (auto: true): <your task>
 ```
 
 Or non-interactively from a script (this is what `./scripts/demo_task.sh` does):
 
 ```bash
-claude --print "Use the dev-task-workflow with auto mode enabled (auto: true) and task: <your task>"
+claude --print "Use the multi-model-flow with auto mode enabled (auto: true) and task: <your task>"
 ```
 
 All supported args:
@@ -312,12 +312,12 @@ to use** above.
 skip the auto-probe and use a specific model:
 
 ```
-/dev-task-workflow with ollamaModel: devstral:latest — Add a rate limiter to /api/v2
+/multi-model-flow with ollamaModel: devstral:latest — Add a rate limiter to /api/v2
 ```
 
 Or via the Workflow tool directly:
 ```js
-Workflow({ name: "dev-task-workflow", args: { task: "...", ollamaModel: "devstral:latest" } })
+Workflow({ name: "multi-model-flow", args: { task: "...", ollamaModel: "devstral:latest" } })
 ```
 
 **Setting a persistent default.** To always use a specific model without
@@ -654,7 +654,7 @@ mismatched model degrades quality but never breaks the workflow.
 The workflow caps retries at 2. If it still fails:
 1. Read the `blocking_issues` and `replanning_notes` printed to stdout
 2. Fix the underlying ambiguity in your task description or in CLAUDE.md
-3. Re-run: `Use the dev-task-workflow with task: [revised description]`
+3. Re-run: `Use the multi-model-flow with task: [revised description]`
 
 If the reviewer is overly strict for your project, edit
 `.claude/agents/reviewer.md` and loosen the blocking criteria.
@@ -697,7 +697,7 @@ underspecified. Options:
 - Include specific file paths or function names in your task description
 - Break the task into smaller, well-scoped sub-tasks
 - Lower the threshold by editing the `planConfidence < 7` check in
-  `.claude/workflows/dev-task-workflow.js`
+  `.claude/workflows/multi-model-flow.js`
 
 If Fable is unavailable in your Claude Code plan, Opus self-validates instead —
 this costs an extra Opus call but produces the same strengthening effect.
@@ -709,4 +709,4 @@ or the tasks you're running are unusually broad. Options:
 - Tighten the task description so the scope is clear
 - Add more context to `CLAUDE.md` (tech stack, constraints, test conventions)
 - Raise the escalation threshold by editing the `confidence < 8` check in
-  `.claude/workflows/dev-task-workflow.js`
+  `.claude/workflows/multi-model-flow.js`

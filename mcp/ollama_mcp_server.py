@@ -208,7 +208,7 @@ def log_event(phase: str, model: str, outcome: str, metadata_json: str = "{}") -
     """
     Record a workflow-level event to the metrics log (metrics.jsonl).
 
-    Called automatically by the dev-task-workflow at the end of each run.
+    Called automatically by the multi-model-flow workflow at the end of each run.
     Can also be called manually to annotate runs or record custom events.
 
     Args:

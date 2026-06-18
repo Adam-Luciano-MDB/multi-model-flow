@@ -1,5 +1,5 @@
 export const meta = {
-  name: "dev-task-workflow",
+  name: "multi-model-flow",
   description: "Three-phase Planner → Worker → Reviewer workflow for cost-optimised coding tasks",
   phases: [
     { title: "Plan", detail: "Opus planner decomposes the task; Fable or Opus validates if confidence < 7" },

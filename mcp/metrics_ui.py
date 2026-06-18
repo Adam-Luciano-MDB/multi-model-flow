@@ -1,5 +1,5 @@
 """
-Metrics UI — a lightweight read-only web dashboard for dev-task-workflow metrics.
+Metrics UI — a lightweight read-only web dashboard for multi-model-flow metrics.
 
 Serves a self-contained HTML page visualizing workflow outcomes, Ollama call
 statistics, and recent runs. Uses stdlib-only HTTP server with CDN-loaded Chart.js
@@ -450,7 +450,7 @@ class MetricsRequestHandler(BaseHTTPRequestHandler):
 def main() -> None:
     """Start the metrics UI server."""
     parser = argparse.ArgumentParser(
-        description="Metrics UI — read-only web dashboard for dev-task-workflow metrics"
+        description="Metrics UI — read-only web dashboard for multi-model-flow metrics"
     )
     parser.add_argument(
         "--host",
