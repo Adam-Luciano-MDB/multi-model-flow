@@ -1,7 +1,7 @@
 ---
 name: mmf
 description: Planner → Worker → Reviewer pipeline for cost-optimised coding. Opus plans, Haiku implements (+ local Ollama if available), Sonnet reviews.
-argument-hint: <task description> [auto] [model:<ollama-model>] [ollama-only] [fast-select]
+argument-hint: <task description> [auto] [model:<ollama-model>] [ollama-only] [ollama-agent] [fast-select]
 allowed-tools: [Agent, TodoWrite]
 ---
 
@@ -13,7 +13,8 @@ Parse the arguments:
 - **task** — the full text, minus any flags below
 - **auto** — skip high-risk confirmation if `[auto]` appears anywhere in the text
 - **pinnedModel** — the model name inside `[model:X]` if present (e.g. `[model:devstral:latest]`)
-- **ollamaOnly** — set if `[ollama-only]` appears; bypasses the Haiku Worker and writes Ollama output directly to the target file
+- **ollamaOnly** — set if `[ollama-only]` appears; Ollama writes the code, a Haiku agent writes it to the file verbatim (no adaptation)
+- **ollamaAgent** — set if `[ollama-agent]` appears; the Ollama model drives the whole step via its own tool-calling loop (reads context, writes files) — no Haiku Worker. Only use with models strong at tool/function calling; falls back to Haiku if the model doesn't call tools
 - **fastSelect** — set if `[fast-select]` appears; skips llm-checker scoring at probe time and just uses the first installed model
 
 Make a numbered todo list covering all four phases before you start, then tick off each item as you complete it.
@@ -110,7 +111,16 @@ Keep a running list of all files written across all steps.
 
 10. For each step in `plan.steps`, in order:
 
-    **a. Ollama generation** (only if OLLAMA_MODEL is set):
+    **a0. Ollama agentic worker** (only when `ollamaAgent` is set AND OLLAMA_MODEL is set) — the local model does the tool calling itself, replacing the Haiku Worker for this step:
+    - Spawn a **Haiku agent** as a thin driver whose only job is to call the `ollama-local run_ollama_coding_agent` MCP tool with:
+      - `task`: the step `instruction` plus `target_file` and a note to read any `context_files` first
+      - `context`: the plan JSON (or the relevant slice)
+      - `model`: OLLAMA_MODEL
+    - Parse the returned JSON. If `status` is `complete` and `files_written` is non-empty: add those files to the tracked list and log `ollama-agent: OLLAMA_MODEL wrote <files> for step STEP_ID`. Then **skip sub-steps a/b** for this step.
+    - If the result starts with `ERROR`, or `status` is `no_tool_calls` (the model didn't call any tools — it isn't tool-capable enough), or no files were written: warn `⚠ [ollama-agent] OLLAMA_MODEL did not complete the step via tool calls — falling back to the Haiku Worker.` and fall through to sub-steps a/b below.
+    - This flag is **opt-in** and only appropriate for models strong at tool/function calling. File writes go straight to disk (sandboxed to the project dir), bypassing the Haiku Worker.
+
+    **a. Ollama generation** (only if OLLAMA_MODEL is set, and not already handled by a0):
     Spawn a **Haiku agent** that calls `ollama-local ask_local_model_for_code` with:
     - `prompt`: the step instruction
     - `language`: inferred from the target_file extension using this map — `.py`→Python, `.ts`/`.tsx`→TypeScript, `.js`/`.jsx`→JavaScript, `.go`→Go, `.rs`→Rust, `.java`→Java, `.rb`→Ruby, `.sh`→Bash, `.sql`→SQL, `.html`→HTML, `.css`→CSS

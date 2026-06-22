@@ -160,7 +160,8 @@ User task description
 | Plan (self-check)  | Planner  | `opus`           | When Fable unavailable and plan confidence < 7/10           |
 | Execute (probe)    | —        | `haiku`          | Once per run — checks if Ollama is running and picks model  |
 | Execute (generate) | —        | Ollama (auto)    | Per step when Ollama available — pre-generates code via MCP |
-| Execute (write)    | Worker   | `haiku`          | Per step — adapts Ollama output, writes files, signals done. Skipped when `[ollama-only]` is set and Ollama is available |
+| Execute (write)    | Worker   | `haiku`          | Per step — adapts Ollama output, writes files, signals done. Skipped when `[ollama-only]` or `[ollama-agent]` is set and Ollama is available |
+| Execute (agent)    | —        | Ollama (auto)    | Only with `[ollama-agent]` — the local model reads context and writes files via its own tool-calling loop, replacing the Haiku Worker for the step |
 | Review             | Reviewer | `sonnet`         | Always — quality bar without Opus cost                      |
 | Review (escalate)  | Reviewer | `opus`           | When Sonnet confidence < 8/10 — independent second opinion  |
 
@@ -309,7 +310,8 @@ All supported flags (placed anywhere in the argument text):
 | _(plain text)_   | —       | The development task description (required)          |
 | `[auto]`         | off     | Skip the high-risk plan confirmation halt            |
 | `[model:<name>]` | —       | Pin a specific Ollama model; skips the auto-probe and scoring |
-| `[ollama-only]`  | off     | Write Ollama output directly to file; bypasses the Haiku Worker's adaptation step. Falls back to Haiku if Ollama is offline. |
+| `[ollama-only]`  | off     | Ollama writes the code; a Haiku agent writes it to the file verbatim (no adaptation). Falls back to Haiku if Ollama is offline. |
+| `[ollama-agent]` | off     | Ollama drives the whole step via its **own tool-calling loop** (reads context, writes files) — no Haiku Worker. Only for models strong at tool calling; falls back to Haiku if the model doesn't call tools. |
 | `[fast-select]`  | off     | Skip llm-checker scoring at probe time; just use the first installed model |
 
 In auto mode a high-risk plan is logged and executed instead of halting. Use it
@@ -342,12 +344,35 @@ falls back to Haiku-only generation silently.
 To get Ollama running with a good model, see **Prerequisites → Finding a model
 to use** above.
 
+**Three ways the Worker can use Ollama** (increasing reliance on the local model):
+
+| Mode | Who writes the file | When to use |
+|------|---------------------|-------------|
+| _default_ | Haiku Worker adapts Ollama's draft | Ollama gives a head start; Haiku ensures it fits the codebase |
+| `[ollama-only]` | Haiku writes Ollama's output **verbatim** | You trust the model's code but not its tool use |
+| `[ollama-agent]` | **Ollama itself**, via its own tool-calling loop | The model is strong at tool/function calling and you want it to do the whole step |
+
+> **`[ollama-agent]` details.** This runs `run_ollama_coding_agent` in the MCP
+> server: the local model is given `read_file` / `write_file` / `list_files`
+> tools and loops until the step is done, writing files directly. Two caveats:
+> (1) it **requires a tool-call-capable model** — weaker models never emit tool
+> calls, and the skill detects this (`status: no_tool_calls`) and falls back to
+> the Haiku Worker; (2) file writes go **straight to disk**, sandboxed to the
+> project directory (path traversal is rejected) but **not** routed through
+> Claude Code's per-write approval. It's opt-in and never a default for that
+> reason. Example:
+>
+> ```
+> /mmf [ollama-agent] [model:qwen2.5-coder:7b] Add a /health endpoint with a test.
+> ```
+
 **Available MCP tools** (also callable directly from Claude):
 - `recommend_model` — RAM-based fallback recommender (no Node.js required)
 - `list_local_models` — see what models are pulled locally
 - `list_models_for_selection` — installed models as a numbered selection list (first = default); used for the runtime model pick
 - `ask_local_model(model, prompt, system)` — raw generation; when `model` is omitted, uses `OLLAMA_DEFAULT_MODEL` if set, else the first installed model
 - `ask_local_model_for_code(prompt, context, language, model)` — code-optimised wrapper; when `model` is omitted, resolves to the first installed model (no hardcoded preference)
+- `run_ollama_coding_agent(task, model, context, work_dir, max_iterations)` — runs a tool-calling loop where the local model reads/writes files itself (file access sandboxed to `work_dir`); powers the `[ollama-agent]` flag. Requires a tool-call-capable model.
 - `log_event` — append a metrics record to `metrics.jsonl`
 - `get_metrics_summary` — print the CLI metrics summary
 - `get_real_token_usage` — parse Claude Code session transcripts and report **real** per-tier token counts and cost (not estimates); includes prompt-cache pricing

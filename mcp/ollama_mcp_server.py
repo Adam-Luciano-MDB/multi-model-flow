@@ -234,6 +234,167 @@ def ask_local_model_for_code(
     return ask_local_model(model=model, prompt=full_prompt, system=system)
 
 
+# ── Ollama agentic worker (opt-in; for tool-call-capable models) ──────────────
+# File tools handed to the local model so it can drive a step itself — read
+# context, write the target file — instead of a Haiku Worker doing it.
+_AGENT_TOOLS = [
+    {"type": "function", "function": {
+        "name": "read_file",
+        "description": "Read a file's full contents.",
+        "parameters": {"type": "object", "properties": {
+            "path": {"type": "string", "description": "Path relative to the project root."}
+        }, "required": ["path"]},
+    }},
+    {"type": "function", "function": {
+        "name": "write_file",
+        "description": "Create or overwrite a file with the given content.",
+        "parameters": {"type": "object", "properties": {
+            "path": {"type": "string", "description": "Path relative to the project root."},
+            "content": {"type": "string", "description": "Full file content to write."}
+        }, "required": ["path", "content"]},
+    }},
+    {"type": "function", "function": {
+        "name": "list_files",
+        "description": "List entries in a directory.",
+        "parameters": {"type": "object", "properties": {
+            "path": {"type": "string", "description": "Directory relative to the project root (default '.')."}
+        }, "required": []},
+    }},
+]
+
+
+def _safe_join(root: str, path: str) -> str:
+    """Resolve `path` under `root`, rejecting traversal outside it."""
+    resolved = os.path.normpath(os.path.join(root, path))
+    if resolved != root and not resolved.startswith(root + os.sep):
+        raise ValueError(f"path '{path}' escapes the work directory")
+    return resolved
+
+
+def _exec_agent_tool(name: str, args, root: str) -> str:
+    """Execute one file tool call from the Ollama agent, sandboxed to `root`."""
+    if isinstance(args, str):
+        try:
+            args = json.loads(args or "{}")
+        except json.JSONDecodeError:
+            return f"ERROR: could not parse arguments: {args!r}"
+    if not isinstance(args, dict):
+        return f"ERROR: arguments must be an object, got {type(args).__name__}"
+    try:
+        if name == "read_file":
+            with open(_safe_join(root, args["path"])) as fh:
+                return fh.read()
+        if name == "write_file":
+            dest = _safe_join(root, args["path"])
+            os.makedirs(os.path.dirname(dest) or ".", exist_ok=True)
+            with open(dest, "w") as fh:
+                fh.write(args.get("content", ""))
+            return f"wrote {args['path']}"
+        if name == "list_files":
+            return "\n".join(sorted(os.listdir(_safe_join(root, args.get("path", ".")))))
+        return f"ERROR: unknown tool '{name}'"
+    except (KeyError, ValueError, OSError) as e:
+        return f"ERROR: {e}"
+
+
+@mcp.tool()
+def run_ollama_coding_agent(
+    task: str,
+    model: str = "",
+    context: str = "",
+    work_dir: str = "",
+    max_iterations: int = 12,
+) -> str:
+    """
+    Run a tool-calling agentic loop with a local Ollama model so the model itself
+    reads context and writes files — replacing the Haiku Worker for a step.
+
+    REQUIRES a model that supports tool/function calling; weaker models will not
+    emit tool calls and the run will report that no files were written so the
+    caller can fall back to Haiku. File access is sandboxed to `work_dir`.
+
+    Args:
+        task: The implementation instruction for this step.
+        model: Ollama model; empty resolves to the first installed model.
+        context: Optional extra context (e.g. plan JSON, conventions).
+        work_dir: Sandbox root for file tools; defaults to the server's cwd.
+        max_iterations: Safety cap on tool-calling rounds (default 12).
+
+    Returns a JSON string:
+      {"status": "complete|max_iterations|no_tool_calls", "files_written": [...],
+       "iterations": N, "final_message": "..."}
+    or a string starting with "ERROR:".
+    """
+    model = _resolve_model(model)
+    if not model:
+        return "ERROR: no local models installed. Pull one with `ollama pull <model>`."
+
+    root = os.path.abspath(work_dir or os.getcwd())
+    system = (
+        "You are a coding agent with file tools: read_file, write_file, list_files. "
+        "Implement the task by reading any needed context and writing the target "
+        "file(s) with write_file. Paths are relative to the project root. When the "
+        "task is fully done, reply with a one-line summary and DO NOT call more tools."
+    )
+    user = task if not context else f"{task}\n\nContext:\n{context}"
+    messages = [
+        {"role": "system", "content": system},
+        {"role": "user", "content": user},
+    ]
+    files_written: list[str] = []
+    status = "max_iterations"
+    final_message = ""
+    t0 = time.time()
+
+    try:
+        for _ in range(max_iterations):
+            response = httpx.post(
+                f"{OLLAMA_BASE}/api/chat",
+                json={"model": model, "messages": messages, "tools": _AGENT_TOOLS, "stream": False},
+                timeout=TIMEOUT,
+            )
+            response.raise_for_status()
+            msg = response.json().get("message", {}) or {}
+            messages.append(msg)
+            tool_calls = msg.get("tool_calls") or []
+            if not tool_calls:
+                final_message = (msg.get("content") or "").strip()
+                status = "complete" if files_written else "no_tool_calls"
+                break
+            for tc in tool_calls:
+                fn = tc.get("function", {}) or {}
+                name = fn.get("name", "")
+                result = _exec_agent_tool(name, fn.get("arguments", {}), root)
+                if name == "write_file" and result.startswith("wrote "):
+                    rel = result[len("wrote "):]
+                    if rel not in files_written:
+                        files_written.append(rel)
+                messages.append({"role": "tool", "content": result})
+    except httpx.ConnectError:
+        return "ERROR: Ollama is not running. Start it with `ollama serve` and retry."
+    except httpx.HTTPStatusError as e:
+        return (f"ERROR: Ollama rejected the request (HTTP {e.response.status_code}). "
+                f"The model '{model}' may not support tool calling — use a tool-capable model.")
+    except httpx.TimeoutException:
+        return f"ERROR: Ollama agent timed out after {TIMEOUT}s."
+    except Exception as e:
+        return f"ERROR: {e}"
+    finally:
+        _append_metric({
+            "phase": "ollama_agent",
+            "model": model,
+            "outcome": "error" if not files_written and status == "no_tool_calls" else status,
+            "meta": {"files_written": len(files_written), "duration_ms": int((time.time() - t0) * 1000)},
+        })
+
+    return json.dumps({
+        "status": status,
+        "files_written": files_written,
+        "iterations": min(max_iterations, len([m for m in messages if m.get("role") == "assistant"]) or max_iterations),
+        "final_message": final_message,
+    })
+
+
 @mcp.tool()
 def log_event(phase: str, model: str, outcome: str, metadata_json: str = "{}") -> str:
     """

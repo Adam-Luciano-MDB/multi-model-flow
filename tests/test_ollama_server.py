@@ -170,6 +170,89 @@ class TestAskLocalModel:
         mock_post.assert_not_called()
 
 
+def _chat(message):
+    """Build a mock httpx response for an Ollama /api/chat reply."""
+    m = MagicMock()
+    m.json.return_value = {"message": message}
+    m.raise_for_status.return_value = None
+    return m
+
+
+class TestSafeJoin:
+    def test_allows_paths_inside_root(self, tmp_path):
+        root = str(tmp_path)
+        assert server._safe_join(root, "sub/file.py").startswith(root)
+
+    def test_rejects_traversal(self, tmp_path):
+        import pytest
+        with pytest.raises(ValueError):
+            server._safe_join(str(tmp_path), "../../etc/passwd")
+
+
+class TestRunOllamaCodingAgent:
+    def test_writes_file_and_reports_it(self, tmp_path):
+        # Round 1: model calls write_file. Round 2: model finishes (no tool calls).
+        responses = [
+            _chat({"role": "assistant", "tool_calls": [
+                {"function": {"name": "write_file",
+                              "arguments": {"path": "out.py", "content": "x = 1\n"}}}
+            ]}),
+            _chat({"role": "assistant", "content": "Done."}),
+        ]
+        with patch("httpx.get", return_value=MagicMock(json=lambda: {"models": [{"name": "m:1b"}]})):
+            with patch("httpx.post", side_effect=responses):
+                with patch.object(_metrics_mod, "append"):
+                    out = server.run_ollama_coding_agent("write out.py", work_dir=str(tmp_path))
+        data = json.loads(out)
+        assert data["status"] == "complete"
+        assert "out.py" in data["files_written"]
+        assert (tmp_path / "out.py").read_text() == "x = 1\n"
+
+    def test_no_tool_calls_reports_no_files(self, tmp_path):
+        with patch("httpx.get", return_value=MagicMock(json=lambda: {"models": [{"name": "m:1b"}]})):
+            with patch("httpx.post", side_effect=[_chat({"role": "assistant", "content": "I think..."})]):
+                with patch.object(_metrics_mod, "append"):
+                    out = server.run_ollama_coding_agent("do it", work_dir=str(tmp_path))
+        data = json.loads(out)
+        assert data["status"] == "no_tool_calls"
+        assert data["files_written"] == []
+
+    def test_http_error_signals_tool_support(self, tmp_path):
+        err = httpx.HTTPStatusError("bad", request=MagicMock(), response=MagicMock(status_code=400))
+        resp = MagicMock()
+        resp.raise_for_status.side_effect = err
+        with patch("httpx.get", return_value=MagicMock(json=lambda: {"models": [{"name": "m:1b"}]})):
+            with patch("httpx.post", return_value=resp):
+                with patch.object(_metrics_mod, "append"):
+                    out = server.run_ollama_coding_agent("x", work_dir=str(tmp_path))
+        assert out.startswith("ERROR")
+        assert "tool calling" in out
+
+    def test_error_when_no_models(self, tmp_path):
+        with patch("httpx.get", side_effect=Exception("offline")):
+            with patch("httpx.post") as mock_post:
+                with patch.object(_metrics_mod, "append"):
+                    out = server.run_ollama_coding_agent("x", work_dir=str(tmp_path))
+        assert out.startswith("ERROR")
+        mock_post.assert_not_called()
+
+    def test_traversal_write_is_blocked(self, tmp_path):
+        responses = [
+            _chat({"role": "assistant", "tool_calls": [
+                {"function": {"name": "write_file",
+                              "arguments": {"path": "../escape.py", "content": "bad"}}}
+            ]}),
+            _chat({"role": "assistant", "content": "done"}),
+        ]
+        with patch("httpx.get", return_value=MagicMock(json=lambda: {"models": [{"name": "m:1b"}]})):
+            with patch("httpx.post", side_effect=responses):
+                with patch.object(_metrics_mod, "append"):
+                    out = server.run_ollama_coding_agent("x", work_dir=str(tmp_path / "proj"))
+        data = json.loads(out)
+        assert data["files_written"] == []
+        assert not (tmp_path / "escape.py").exists()
+
+
 class TestListModelsForSelection:
     def test_numbered_list_marks_first_as_default(self):
         with patch("httpx.get", return_value=MagicMock(json=lambda: {
