@@ -15,6 +15,7 @@ from fastmcp import FastMCP
 # Allow importing the sibling metrics module regardless of working directory.
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import metrics as _metrics
+import token_usage as _token_usage
 
 OLLAMA_BASE = os.environ.get("OLLAMA_BASE_URL", "http://localhost:11434")
 # Developer-overridable default model. Set OLLAMA_DEFAULT_MODEL in your shell or
@@ -235,6 +236,19 @@ def get_metrics_summary() -> str:
     latency by model, and estimated token usage for local calls.
     """
     return _metrics.summarize()
+
+
+@mcp.tool()
+def get_real_token_usage() -> str:
+    """
+    Return REAL Claude token usage by tier, parsed from Claude Code session
+    transcripts (not estimated from call counts).
+
+    Reads the active project's main session plus all sub-agent transcripts,
+    sums actual input/output/cache tokens per model tier, and computes real
+    cost using current per-tier pricing including prompt-cache multipliers.
+    """
+    return _token_usage.summarize_real_usage()
 
 
 def _port_is_open(port: int, host: str = "127.0.0.1", timeout: float = 0.3) -> bool:

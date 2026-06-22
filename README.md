@@ -348,6 +348,7 @@ to use** above.
 - `ask_local_model_for_code(prompt, context, language, model)` — code-optimised wrapper (auto-selects a model when `model` is omitted)
 - `log_event` — append a metrics record to `metrics.jsonl`
 - `get_metrics_summary` — print the CLI metrics summary
+- `get_real_token_usage` — parse Claude Code session transcripts and report **real** per-tier token counts and cost (not estimates); includes prompt-cache pricing
 - `open_metrics_dashboard` — start the web dashboard (background, 127.0.0.1:8765) and return its URL; works regardless of where the plugin is installed
 
 **Pinning a model for a single run.** Use the `[model:<name>]` flag to skip the
@@ -447,6 +448,23 @@ Approx tokens out: 12,000  (from  48,000 chars)
 Claude API cost is **estimated** from per-tier call counts × typical prompt
 sizes (not real token counts). Use the [Claude Console](https://console.anthropic.com)
 for exact billing.
+
+### Real token usage (from transcripts)
+
+The estimated table above is a call-count approximation. For **actual** token
+counts, the dashboard also reads Claude Code's session transcripts
+(`~/.claude/projects/<project>/…`, including each sub-agent's own transcript)
+and reports the real input/output/cache tokens and cost per tier — cost computed
+with current per-tier pricing and prompt-cache multipliers (read 0.1×, write
+1.25×). Ask Claude directly for the same data:
+
+```
+Use the ollama-local get_real_token_usage tool.
+```
+
+A skill can't see the token counts of the sub-agents it spawns (that's harness
+telemetry), so this is the only way to get true per-tier numbers — it reads them
+off disk after the fact rather than estimating.
 
 **What the metrics tell you:**
 - `steps_planned` vs `files_written` — if files < steps, some steps wrote nothing (check worker output)

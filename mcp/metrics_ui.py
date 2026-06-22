@@ -17,6 +17,7 @@ from typing import Any
 # Allow importing the sibling metrics module regardless of working directory.
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import metrics
+import token_usage
 
 
 INDEX_HTML = """<!DOCTYPE html>
@@ -197,6 +198,7 @@ INDEX_HTML = """<!DOCTYPE html>
             const workflow = data.workflow;
             const ollama = data.ollama;
             const claude = data.claude || { total_calls: 0, by_tier: [], est_total_cost_usd: 0, est_ollama_savings_usd: 0 };
+            const realTokens = data.real_tokens || { by_tier: [], total_tokens: 0, total_cost_usd: 0 };
             let html = '';
 
             // Summary cards
@@ -226,6 +228,11 @@ INDEX_HTML = """<!DOCTYPE html>
                     <h3>Claude Calls</h3>
                     <div class="value">${claude.total_calls}</div>
                     <div class="subtext">~$${claude.est_total_cost_usd.toFixed(2)} est.</div>
+                </div>
+                <div class="card">
+                    <h3>Real Claude Cost</h3>
+                    <div class="value">$${(realTokens.total_cost_usd || 0).toFixed(2)}</div>
+                    <div class="subtext">${(realTokens.total_tokens || 0).toLocaleString()} tokens (transcripts)</div>
                 </div>
                 <div class="card">
                     <h3>Ollama Savings</h3>
@@ -444,6 +451,56 @@ INDEX_HTML = """<!DOCTYPE html>
                 `;
             }
 
+            // Real token usage (from transcripts)
+            if (realTokens.by_tier && realTokens.by_tier.length > 0) {
+                html += `
+                    <div class="table-card">
+                        <h2>Real Token Usage (from transcripts)</h2>
+                        <table>
+                            <thead>
+                                <tr>
+                                    <th>Tier</th>
+                                    <th>Input</th>
+                                    <th>Cache Read</th>
+                                    <th>Cache Write</th>
+                                    <th>Output</th>
+                                    <th>Total</th>
+                                    <th>Real Cost</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                `;
+                for (const t of realTokens.by_tier) {
+                    html += `
+                        <tr>
+                            <td>${escapeHtml(t.tier)}</td>
+                            <td>${(t.input_tokens || 0).toLocaleString()}</td>
+                            <td>${(t.cache_read_tokens || 0).toLocaleString()}</td>
+                            <td>${(t.cache_creation_tokens || 0).toLocaleString()}</td>
+                            <td>${(t.output_tokens || 0).toLocaleString()}</td>
+                            <td>${(t.total_tokens || 0).toLocaleString()}</td>
+                            <td>$${(t.cost_usd || 0).toFixed(3)}</td>
+                        </tr>
+                    `;
+                }
+                html += `
+                        <tr style="font-weight:600;border-top:2px solid #e0e0e0;">
+                            <td colspan="5">Total</td>
+                            <td>${(realTokens.total_tokens || 0).toLocaleString()}</td>
+                            <td>$${(realTokens.total_cost_usd || 0).toFixed(3)}</td>
+                        </tr>
+                            </tbody>
+                        </table>
+                        <p style="font-size:11px;color:#999;margin-top:8px;">
+                            Actual token counts from Claude Code session transcripts (main + sub-agents).
+                            Cost uses current per-tier pricing with prompt-cache multipliers
+                            (read 0.1×, write 1.25×). This is the real number; the estimated table above
+                            is a call-count approximation.
+                        </p>
+                    </div>
+                `;
+            }
+
             document.getElementById('content').innerHTML = html;
 
             // Render charts
@@ -580,8 +637,14 @@ INDEX_HTML = """<!DOCTYPE html>
 
 
 def render_metrics_json() -> str:
-    """Return JSON string of aggregated metrics."""
-    return json.dumps(metrics.aggregate())
+    """Return JSON string of aggregated metrics, including real transcript tokens."""
+    data = metrics.aggregate()
+    try:
+        data["real_tokens"] = token_usage.aggregate_real_usage()
+    except Exception:
+        # Never let transcript parsing break the dashboard.
+        data["real_tokens"] = {"source": "transcripts", "by_tier": [], "total_tokens": 0, "total_cost_usd": 0}
+    return json.dumps(data)
 
 
 class MetricsRequestHandler(BaseHTTPRequestHandler):
