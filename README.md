@@ -17,6 +17,9 @@ Once installed, invoke it from any project with the **`/mmf`** slash command.
   continues.
 - **Review confidence** — if Sonnet scores below 8/10, Opus gives an
   independent second opinion before the verdict is accepted.
+- **Hard test gate** — the reviewer must run the test suite; if any test fails
+  the run is forced to `rejected` and cannot be approved (enforced in Phase 3,
+  not left to the reviewer's discretion).
 
 Drop it into any codebase; it is framework and language agnostic.
 
@@ -134,10 +137,12 @@ User task description
         └──────────────┬───────────────────────────────┘
                        │ files_written
                        ▼
-             ┌───────────────────┐
-             │  Reviewer         │
-             │  (sonnet)         │
-             └─────────┬─────────┘
+             ┌──────────────────────────┐
+             │  Reviewer (sonnet)       │
+             │  HARD TEST GATE:         │
+             │  run suite → fail =      │
+             │  rejected (no override)  │
+             └─────────┬────────────────┘
                confidence score 1–10
                         │
              ┌──────────▼──────────┐
@@ -825,6 +830,15 @@ continues with the best available plan.
 {
   "verdict": "approved|rejected|approved_with_notes",
   "confidence": 9,
+  "tests": {
+    "found": true,
+    "ran": true,
+    "command": "python -m pytest -q",
+    "exit_code": 0,
+    "passed": 9,
+    "failed": 0,
+    "output_excerpt": "9 passed in 0.3s"
+  },
   "criteria_results": [
     {
       "criterion": "text from review_criteria",
@@ -841,6 +855,15 @@ continues with the best available plan.
 
 `confidence` is 1–10. If Sonnet scores below 8, the workflow automatically
 escalates to Opus for an independent second review before accepting the verdict.
+
+**Hard test gate.** The `tests` object is required and is a **blocking gate**:
+running the suite is mandatory (the reviewer captures the real exit code via
+`; echo "EXIT:$?"`). If a suite exists and any test fails, the verdict is forced
+to `rejected` — and Phase 3 enforces this at the orchestration level too, so a
+run **cannot be approved with failing tests** even if the reviewer slips. A
+failing gate feeds the failing-test output back into a replan (up to the retry
+cap). If no test suite exists, the gate has nothing to enforce and the run
+proceeds on review judgment with a "ships without tests" note.
 
 ---
 

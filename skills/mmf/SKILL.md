@@ -173,37 +173,43 @@ Keep a running list of all files written across all steps.
     >
     > Files written by Worker: FILE_LIST
     >
-    > Read each file, run the test suite if available, and return your verdict JSON."
+    > Run the test suite (this is a mandatory, blocking gate — capture the real exit code with `; echo \"EXIT:$?\"`). Read each file and return your verdict JSON, including the required `tests` object. If any test fails, the verdict MUST be `rejected`."
 
 12. **Confidence escalation** — if `verdict.confidence < 8`:
     Spawn a second **Reviewer agent** (`model: opus`) with the same prompt plus:
     > "Note: A Sonnet reviewer scored this N/10 confidence. Please give it a thorough independent review and return your own verdict JSON."
     Use the Opus verdict going forward.
 
-13. **Verdict**:
-    - `approved` or `approved_with_notes`: log the list of files built, show any non-blocking suggestions, then proceed to Phase 4.
-    - `rejected` with `new_plan_needed: true`: append `verdict.replanning_notes` to the original task description and repeat from **Phase 1**. Maximum **2 replans total** (3 attempts). If the cap is hit, stop and report the blocking issues.
+13. **Hard test gate (enforced here, not just trusted to the reviewer)** — inspect `verdict.tests` before honoring `verdict.verdict`:
+    - If `tests.found` is true AND `tests.ran` is true AND (`tests.exit_code` is non-zero OR `tests.failed > 0`): **treat the run as `rejected` regardless of what `verdict.verdict` says.** Log `✗ Test gate FAILED — N test(s) failing; cannot approve.` with the `tests.output_excerpt`, set `new_plan_needed` true, and use the failing-test output as the replanning note.
+    - If `tests.found` is true but `tests.ran` is false (suite exists, couldn't run): do **not** approve — log `✗ Test gate could not run the existing suite — blocking.` and treat as `rejected` (manual intervention).
+    - If `tests.found` is false (no suite): log `⚠ No test suite found — nothing to gate on; approving on review alone.` and continue with the reviewer's verdict.
+    - If `tests.ran` is true and passed (`exit_code` 0, no failures): log `✓ Test gate passed (N tests)` and continue.
+
+14. **Verdict** (after the test gate):
+    - `approved` or `approved_with_notes` (and the test gate did not fail): log the list of files built, show any non-blocking suggestions, then proceed to Phase 4.
+    - `rejected` with `new_plan_needed: true` (including a test-gate failure): append `verdict.replanning_notes` (or the failing-test output) to the original task description and repeat from **Phase 1**. Maximum **2 replans total** (3 attempts). If the cap is hit, stop and report the blocking issues (and failing tests).
     - `rejected` without `new_plan_needed`: stop and report the blocking issues. Manual intervention required.
 
 ---
 
 ## Phase 4 — Metrics
 
-14. Count how many times you spawned each model tier across all phases:
+15. Count how many times you spawned each model tier across all phases:
     - **opus**: planner + any Opus strengthener + any Opus review escalation
     - **fable**: any Fable strengthener
     - **sonnet**: final reviewer + one per-step Sonnet check for each chunked (context-overflow) step
     - **haiku**: Ollama probe + any Ollama step drivers + workers + chunk split/stitch/fix agents + metrics call
 
-15. Spawn a **Haiku agent** to call `ollama-local log_event` with:
+16. Spawn a **Haiku agent** to call `ollama-local log_event` with:
     - `phase`: `"workflow"`
     - `model`: the tiers actually used, joined with `+` (e.g. `"opus+devstral+haiku+sonnet"`)
-    - `outcome`: the final verdict string (e.g. `"approved"`, `"approved_with_notes"`, `"rejected_no_replan"`, `"high_risk"`, `"execution_failed"`)
-    - `metadata_json`: a JSON string — `{"task":"<first 80 chars of task>","steps_planned":N,"files_written":N,"retries":N,"chunked_steps":N,"ollama_model":"<model or empty string>","claude_calls":{"opus":N,"fable":N,"sonnet":N,"haiku":N}}`
+    - `outcome`: the final verdict string (e.g. `"approved"`, `"approved_with_notes"`, `"rejected_no_replan"`, `"test_gate_failed"`, `"high_risk"`, `"execution_failed"`)
+    - `metadata_json`: a JSON string — `{"task":"<first 80 chars of task>","steps_planned":N,"files_written":N,"retries":N,"chunked_steps":N,"tests_passed":true|false|null,"ollama_model":"<model or empty string>","claude_calls":{"opus":N,"fable":N,"sonnet":N,"haiku":N}}`
 
-16. **Token budget check** — spawn a **Haiku agent** to call `ollama-local check_token_budget` (limit 170000). If it reports any sub-agent over budget, surface the warning to the user verbatim (e.g. `⚠ planner: peak context ~210k tokens — exceeded the 170k budget; consider splitting the task`). The Planner and Reviewer carry the 170k context-budget instruction, but it is guidance the model may exceed; this check verifies it against the real transcript token counts after the run. (A skill cannot hard-cap a sub-agent's context, so this is a check-and-warn, not a hard stop.)
+17. **Token budget check** — spawn a **Haiku agent** to call `ollama-local check_token_budget` (limit 170000). If it reports any sub-agent over budget, surface the warning to the user verbatim (e.g. `⚠ planner: peak context ~210k tokens — exceeded the 170k budget; consider splitting the task`). The Planner and Reviewer carry the 170k context-budget instruction, but it is guidance the model may exceed; this check verifies it against the real transcript token counts after the run. (A skill cannot hard-cap a sub-agent's context, so this is a check-and-warn, not a hard stop.)
 
-17. Spawn a **Haiku agent** to call the `ollama-local open_metrics_dashboard` tool, then log its returned URL:
+18. Spawn a **Haiku agent** to call the `ollama-local open_metrics_dashboard` tool, then log its returned URL:
     ```
     Done. Metrics dashboard: http://localhost:8765 (read-only). For a text summary, ask: "Use the ollama-local get_metrics_summary tool."
     ```
