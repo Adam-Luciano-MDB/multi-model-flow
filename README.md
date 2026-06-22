@@ -106,24 +106,24 @@ User task description
        └────────────┤
                     │ JSON plan
                     ▼
-          ┌──────────────────────┐
-          │  Ollama probe        │  ← auto-detects once per run
-          │  (haiku calls MCP)   │
-          └──────────┬───────────┘
+          ┌────────────────────────────────────┐
+          │  Ollama probe + model selection    │  ← once per run (runs at startup)
+          │  llm-checker score → first installed│
+          │  (runtime pick unless auto/pinned) │
+          └──────────┬─────────────────────────┘
           offline ▼  │ model found
                      ▼
-        ┌────────────────────────────────────────┐
-        │  per step:                             │
-        │                                        │
-        │  [if Ollama] ollama:step-N (haiku)     │
-        │     → ask_local_model_for_code         │
-        │     → pre-generated code               │
-        │            │                           │
-        │            ▼                           │
-        │  worker:step-N (haiku)                 │
-        │     reads context + adapts code        │
-        │     writes file                        │
-        └──────────────┬─────────────────────────┘
+        ┌──────────────────────────────────────────────┐
+        │  per step — one of three modes:              │
+        │                                              │
+        │  default:       ollama draft (haiku) →       │
+        │                 worker (haiku) adapts+writes │
+        │  [ollama-only]: ollama draft → haiku writes  │
+        │                 it verbatim                  │
+        │  [ollama-agent]: ollama runs its own tool-   │
+        │                 calling loop, writes files   │
+        │                 itself (→ worker on failure) │
+        └──────────────┬───────────────────────────────┘
                        │ files_written
                        ▼
              ┌───────────────────┐
@@ -143,10 +143,11 @@ User task description
           └───────┬───────┘
                   │ verdict JSON
                   ▼
-    ┌─────────────────────────┐
-    │  metrics.jsonl          │
-    │  + web dashboard :8765  │
-    └─────────────────────────┘
+    ┌──────────────────────────────────────┐
+    │  metrics.jsonl + real-token usage      │
+    │  web dashboard :8765 (auto-started     │
+    │  at run start, Phase 0)                │
+    └────────────────────────────────────────┘
 ```
 
 ---
