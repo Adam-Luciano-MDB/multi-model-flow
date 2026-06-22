@@ -308,8 +308,9 @@ All supported flags (placed anywhere in the argument text):
 |------------------|---------|------------------------------------------------------|
 | _(plain text)_   | —       | The development task description (required)          |
 | `[auto]`         | off     | Skip the high-risk plan confirmation halt            |
-| `[model:<name>]` | —       | Pin a specific Ollama model; skips the auto-probe    |
+| `[model:<name>]` | —       | Pin a specific Ollama model; skips the auto-probe and scoring |
 | `[ollama-only]`  | off     | Write Ollama output directly to file; bypasses the Haiku Worker's adaptation step. Falls back to Haiku if Ollama is offline. |
+| `[fast-select]`  | off     | Skip llm-checker scoring at probe time; use the quick devstral→qwen2.5-coder→first heuristic instead |
 
 In auto mode a high-risk plan is logged and executed instead of halting. Use it
 deliberately — the confirmation step exists to catch destructive plans before
@@ -368,10 +369,16 @@ passing the arg each time, set it via an environment variable:
 | `OLLAMA_TIMEOUT`       | `1500`                   | Generation timeout in seconds (default 25 min)                |
 
 > **Note:** `OLLAMA_DEFAULT_MODEL` is a server-side default for the
-> `ask_local_model` tool, not what the skill's probe uses. The probe selects a
-> model by priority: **devstral** (any variant), then **qwen2.5-coder** (any
-> variant), then the **first model** `list_local_models` returns. To force a
-> specific model for a run, pass `[model:<name>]` (see above).
+> `ask_local_model` tool, not what the skill's probe uses. At probe time the
+> skill **auto-selects the best installed coding model**: it asks `llm-checker`
+> to rank models for `category: coding` and picks the highest-scored model you
+> already have pulled, logging the candidates it considered. If `llm-checker`
+> isn't available (or you pass `[fast-select]`), it falls back to a quick
+> heuristic — **devstral** → **qwen2.5-coder** → **first model** returned. To
+> force a specific model for a run, pass `[model:<name>]` (see above).
+>
+> This scoring ranks models you've *already* installed by coding quality, so the
+> "stop Ollama before running llm-checker" caveat does **not** apply to it.
 
 For a hardware-aware recommendation across 229+ models, use the `llm-checker`
 MCP server (see **Model selection with llm-checker** below).
@@ -725,9 +732,11 @@ silently falls back to Haiku-only generation. No manual intervention required.
 
 ### Ollama is detected but code generation looks wrong
 
-The probe prefers devstral, then qwen2.5-coder, then the first model
-`list_local_models` returns. If the selected model is not suited for coding,
-pin a better one for the run:
+The probe auto-selects the highest-scored installed coding model via
+`llm-checker` (falling back to devstral → qwen2.5-coder → first when llm-checker
+is unavailable or `[fast-select]` is passed). The skill logs which candidates it
+considered and why. If the selected model is still not suited for coding, pin a
+better one for the run:
 
 ```
 /mmf [model:qwen2.5-coder:7b] <your task>

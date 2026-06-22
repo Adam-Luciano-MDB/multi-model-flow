@@ -1,7 +1,7 @@
 ---
 name: mmf
 description: Planner → Worker → Reviewer pipeline for cost-optimised coding. Opus plans, Haiku implements (+ local Ollama if available), Sonnet reviews.
-argument-hint: <task description> [auto] [model:<ollama-model>] [ollama-only]
+argument-hint: <task description> [auto] [model:<ollama-model>] [ollama-only] [fast-select]
 allowed-tools: [Agent, TodoWrite]
 ---
 
@@ -14,6 +14,7 @@ Parse the arguments:
 - **auto** — skip high-risk confirmation if `[auto]` appears anywhere in the text
 - **pinnedModel** — the model name inside `[model:X]` if present (e.g. `[model:devstral:latest]`)
 - **ollamaOnly** — set if `[ollama-only]` appears; bypasses the Haiku Worker and writes Ollama output directly to the target file
+- **fastSelect** — set if `[fast-select]` appears; skips llm-checker scoring at probe time and uses the quick devstral→qwen2.5-coder→first heuristic instead
 
 Make a numbered todo list covering all four phases before you start, then tick off each item as you complete it.
 
@@ -31,9 +32,22 @@ Make a numbered todo list covering all four phases before you start, then tick o
 
 3. Spawn a **Haiku agent** whose sole job is to call the `ollama-local list_local_models` MCP tool and return the raw result.
 
-4. Determine OLLAMA_MODEL from that result:
-   - **If a pinnedModel was passed**: if the result confirms Ollama is reachable (any non-ERROR line returned), use pinnedModel. If Ollama is offline, warn and fall back to null.
-   - **Otherwise**: parse the model list (skip lines containing "ERROR" or the literal word "none"). Select with this priority: devstral (any variant) → qwen2.5-coder (any variant) → first model in the list → null.
+4. Determine OLLAMA_MODEL from that result. Let INSTALLED = the parsed model list from step 3 (skip lines containing "ERROR" or the literal word "none").
+
+   - **If a pinnedModel was passed**: if Ollama is reachable (any non-ERROR line returned), use pinnedModel. If Ollama is offline, warn and fall back to null. (Skip the scoring below — the user chose explicitly.)
+   - **If Ollama is offline or INSTALLED is empty**: OLLAMA_MODEL = null.
+   - **Otherwise — scored auto-select** (default; skipped when `[fast-select]` is set):
+     1. Spawn a **Haiku agent** to call the `llm-checker recommend` MCP tool with `category: coding`, returning the ranked models with their scores.
+     2. Pick the **highest-scored** model whose base name (the part before `:`) matches a model in INSTALLED — i.e. the best *coding-quality* model you already have pulled. Set OLLAMA_MODEL to the installed tag.
+     3. Log the candidates considered, e.g.:
+        ```
+        Ollama model selection (llm-checker, category: coding):
+          qwen2.5-coder:7b   score 81  ← selected (installed)
+          devstral:latest    score 74  (installed)
+          llama3.1:8b        score 40  (installed)
+        ```
+     - **Note:** the "stop Ollama before running llm-checker" caveat does **not** apply here — this ranks models you've *already* pulled by coding quality, it does not estimate what your hardware can newly run.
+   - **Fallback heuristic** — use this when `[fast-select]` is set, when `llm-checker` is unavailable or errors, or when no recommended model overlaps INSTALLED: select with this priority from INSTALLED — devstral (any variant) → qwen2.5-coder (any variant) → first model in the list → null.
 
 5. Log the outcome:
    - Ollama available: update the banner — `worker: haiku + OLLAMA_MODEL`
