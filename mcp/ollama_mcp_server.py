@@ -71,6 +71,49 @@ def _resolve_model(model: str) -> str:
     return model or DEFAULT_MODEL or _first_installed_model()
 
 
+def _model_context_length(model: str):
+    """Max context window (tokens) for a model via Ollama /api/show, or None if unknown."""
+    try:
+        resp = httpx.post(f"{OLLAMA_BASE}/api/show", json={"name": model}, timeout=10)
+        resp.raise_for_status()
+        info = resp.json().get("model_info", {}) or {}
+        for key, val in info.items():
+            if key.endswith(".context_length"):
+                return int(val)
+    except Exception:
+        pass
+    return None
+
+
+def _context_warning(model: str, prompt_chars: int):
+    """Return (est_tokens, ctx, warning) — warning is non-empty if the prompt likely overflows."""
+    ctx = _model_context_length(model)
+    est = prompt_chars // 4  # rough chars→tokens
+    if ctx and est > ctx:
+        return est, ctx, (
+            f"prompt ~{est:,} tokens exceeds {model}'s context window ~{ctx:,} — "
+            "Ollama will truncate the input and output quality will suffer. "
+            "Pin a larger-context model with [model:<name>] or reduce the context."
+        )
+    return est, ctx, ""
+
+
+@mcp.tool()
+def get_model_context_length(model: str = "") -> str:
+    """
+    Report a local model's maximum context window (tokens), read from Ollama's
+    /api/show metadata. Use this to know whether a model can hold a given prompt
+    before sending it. Empty `model` resolves to the first installed model.
+    """
+    model = _resolve_model(model)
+    if not model:
+        return "ERROR: no local models installed."
+    ctx = _model_context_length(model)
+    if ctx is None:
+        return f"{model}: context length not reported by Ollama (/api/show)."
+    return f"{model}: max context window ~{ctx:,} tokens."
+
+
 @mcp.tool()
 def list_models_for_selection() -> str:
     """
@@ -348,6 +391,8 @@ def run_ollama_coding_agent(
     # section (chars ÷ 4). Count unique new content, not resent history.
     prompt_chars = len(system) + len(user)
     response_chars = 0
+    # Context-window check on the initial prompt (Ollama truncates silently).
+    _est, ctx_len, ctx_warning = _context_warning(model, prompt_chars)
     t0 = time.time()
 
     try:
@@ -412,6 +457,8 @@ def run_ollama_coding_agent(
         "files_written": files_written,
         "iterations": min(max_iterations, len([m for m in messages if m.get("role") == "assistant"]) or max_iterations),
         "final_message": final_message,
+        "context_length": ctx_len,
+        "context_warning": ctx_warning,
     })
 
 
@@ -460,6 +507,18 @@ def get_real_token_usage() -> str:
     cost using current per-tier pricing including prompt-cache multipliers.
     """
     return _token_usage.summarize_real_usage()
+
+
+@mcp.tool()
+def check_token_budget(limit_tokens: int = 170000) -> str:
+    """
+    Check each spawned sub-agent's PEAK context size against a per-subtask token
+    budget (default 170,000 — the figure Anthropic uses for its own workflows),
+    parsed from Claude Code session transcripts. Reports any agent that exceeded
+    it. This is a post-run check (a skill can't hard-cap a sub-agent's context),
+    so use it to catch and warn on budget overruns.
+    """
+    return _token_usage.summarize_token_budget(limit_tokens)
 
 
 def _port_is_open(port: int, host: str = "127.0.0.1", timeout: float = 0.3) -> bool:

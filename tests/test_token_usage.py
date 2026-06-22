@@ -87,6 +87,51 @@ class TestAggregateRealUsage:
         assert result["total_tokens"] == 6
 
 
+class TestTokenBudget:
+    def _make_subagent(self, tmp_path, agent_type, peak_input):
+        proj = tmp_path / "proj"
+        sub = proj / "sess" / "subagents"
+        sub.mkdir(parents=True, exist_ok=True)
+        jsonl = sub / f"agent-{agent_type}.jsonl"
+        with open(jsonl, "w") as fh:
+            # two records; the larger input is the peak
+            fh.write(json.dumps({"type": "assistant", "message": {"model": "claude-opus-4-8",
+                "usage": {"input_tokens": 1000, "cache_read_input_tokens": 0, "output_tokens": 50}}}) + "\n")
+            fh.write(json.dumps({"type": "assistant", "message": {"model": "claude-opus-4-8",
+                "usage": {"input_tokens": peak_input, "cache_read_input_tokens": 0, "output_tokens": 50}}}) + "\n")
+        with open(str(jsonl)[:-len(".jsonl")] + ".meta.json", "w") as fh:
+            json.dump({"agentType": agent_type}, fh)
+        return str(proj)
+
+    def test_peak_context_uses_max_not_sum(self, tmp_path):
+        proj = self._make_subagent(tmp_path, "planner", 50000)
+        rows = token_usage.peak_context_by_subagent(proj)
+        assert len(rows) == 1
+        assert rows[0]["agent_type"] == "planner"
+        assert rows[0]["peak_context_tokens"] == 50000  # max(1000, 50000), not the sum
+
+    def test_check_flags_over_budget(self, tmp_path):
+        proj = self._make_subagent(tmp_path, "planner", 200000)
+        result = token_usage.check_token_budget(170000, proj)
+        assert result["ok"] is False
+        assert result["over_budget"][0]["agent_type"] == "planner"
+
+    def test_check_ok_when_under(self, tmp_path):
+        proj = self._make_subagent(tmp_path, "reviewer", 80000)
+        result = token_usage.check_token_budget(170000, proj)
+        assert result["ok"] is True
+        assert result["over_budget"] == []
+
+    def test_summary_messages(self, tmp_path):
+        proj = self._make_subagent(tmp_path, "planner", 200000)
+        out = token_usage.summarize_token_budget(170000, proj)
+        assert "exceeded" in out and "planner" in out
+
+    def test_no_subagents(self, tmp_path):
+        out = token_usage.summarize_token_budget(170000, str(tmp_path / "empty"))
+        assert "No subagent transcripts" in out
+
+
 class TestSummarizeRealUsage:
     def test_message_when_empty(self, tmp_path):
         out = token_usage.summarize_real_usage(str(tmp_path / "nope"))

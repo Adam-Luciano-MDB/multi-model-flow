@@ -177,6 +177,45 @@ reasoning about trade-offs that Haiku handles poorly under ambiguous specs.
 
 ---
 
+## Token & context budgets
+
+Two safeguards keep work inside the context each model can actually handle.
+
+### Claude sub-agents — 170k context budget (checked, not hard-capped)
+
+The Planner and Reviewer agents carry an instruction to keep their working
+context under **170,000 tokens** (the figure Anthropic uses for its own
+workflows). That instruction is guidance the model *may* exceed, and a skill
+**cannot hard-cap** a sub-agent's context — the Agent tool exposes no token
+ceiling. So mmf **checks it after the run** instead: Phase 4 calls
+`check_token_budget`, which parses the session transcripts and reports each
+sub-agent's **peak single-request context** (input + cache-read + cache-creation
+tokens — the largest window it actually held, not the cumulative sum). Anything
+over the budget is surfaced as a warning so you can split the task. Run it
+yourself anytime:
+
+```
+Use the ollama-local check_token_budget tool.
+```
+
+### Ollama models — context-window awareness
+
+Ollama does **not** error when a prompt exceeds a model's context window — it
+**silently truncates**, which quietly degrades output. mmf reads the model's max
+window from Ollama's `/api/show` and surfaces it:
+
+- Phase 0 logs the selected model's window in the banner (e.g. `granite4:7b-a1b-h (ctx ~1.0M)`).
+- In `[ollama-agent]` mode, if a step's prompt is estimated to overflow the
+  window, the run returns a `context_warning` that the skill shows you.
+- Query it directly: `Use the ollama-local get_model_context_length tool.`
+
+> Note: a model's *max* window (what `/api/show` reports) and the window Ollama
+> actually allocates at runtime (`num_ctx`, often a smaller default) can differ.
+> mmf warns against the max; if you have a large-context model but see
+> truncation, raise `num_ctx` in your Ollama configuration.
+
+---
+
 ## Prerequisites
 
 - **Claude Code** installed and authenticated (`claude --version`)
@@ -374,6 +413,8 @@ to use** above.
 - `ask_local_model(model, prompt, system)` — raw generation; when `model` is omitted, uses `OLLAMA_DEFAULT_MODEL` if set, else the first installed model
 - `ask_local_model_for_code(prompt, context, language, model)` — code-optimised wrapper; when `model` is omitted, resolves to the first installed model (no hardcoded preference)
 - `run_ollama_coding_agent(task, model, context, work_dir, max_iterations)` — runs a tool-calling loop where the local model reads/writes files itself (file access sandboxed to `work_dir`); powers the `[ollama-agent]` flag. Requires a tool-call-capable model.
+- `get_model_context_length(model)` — the model's max context window (tokens), read from Ollama `/api/show`; use it to know whether a model can hold a prompt before sending
+- `check_token_budget(limit_tokens=170000)` — post-run check of each sub-agent's **peak context** against a per-subtask token budget, parsed from transcripts; warns on overruns
 - `log_event` — append a metrics record to `metrics.jsonl`
 - `get_metrics_summary` — print the CLI metrics summary
 - `get_real_token_usage` — parse Claude Code session transcripts and report **real** per-tier token counts and cost (not estimates); includes prompt-cache pricing

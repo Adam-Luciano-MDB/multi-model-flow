@@ -55,7 +55,7 @@ Make a numbered todo list covering all four phases before you start, then tick o
    - **Otherwise**: present the installed models as a numbered selection list (using the `ollama-local list_models_for_selection` tool, or the candidate log above) with the auto-selected model marked as the recommended default, and ask the user which to use via AskUserQuestion. Offer the recommended model as the first option. If the user picks a different one, set OLLAMA_MODEL to it; if they accept the default or don't answer, keep the computed pick.
 
 5. Log the outcome:
-   - Ollama available: update the banner — `worker: haiku + OLLAMA_MODEL`
+   - Ollama available: update the banner — `worker: haiku + OLLAMA_MODEL`. Then spawn a **Haiku agent** to call `ollama-local get_model_context_length` for OLLAMA_MODEL and append its context window to the banner (e.g. `worker: haiku + granite4:7b-a1b-h (ctx ~131k)`) so you and the user know how much the local model can hold. If unknown, omit silently.
    - Ollama offline: `Ollama not available — Worker will use Haiku for all generation`
 
 6. (Optional) If the user mentioned needing hardware recommendations or model selection, warn them first:
@@ -116,7 +116,7 @@ Keep a running list of all files written across all steps.
       - `task`: the step `instruction` plus `target_file` and a note to read any `context_files` first
       - `context`: the plan JSON (or the relevant slice)
       - `model`: OLLAMA_MODEL
-    - Parse the returned JSON. If `status` is `complete` and `files_written` is non-empty: add those files to the tracked list and log `ollama-agent: OLLAMA_MODEL wrote <files> for step STEP_ID`. Then **skip sub-steps a/b** for this step.
+    - Parse the returned JSON. If it has a non-empty `context_warning`, surface it to the user (`⚠ <context_warning>`) — the prompt overflowed the model's context window. If `status` is `complete` and `files_written` is non-empty: add those files to the tracked list and log `ollama-agent: OLLAMA_MODEL wrote <files> for step STEP_ID`. Then **skip sub-steps a/b** for this step.
     - If the result starts with `ERROR`, or `status` is `no_tool_calls` (the model didn't call any tools — it isn't tool-capable enough), or no files were written: warn `⚠ [ollama-agent] OLLAMA_MODEL did not complete the step via tool calls — falling back to the Haiku Worker.` and fall through to sub-steps a/b below.
     - This flag is **opt-in** and only appropriate for models strong at tool/function calling. File writes go straight to disk (sandboxed to the project dir), bypassing the Haiku Worker.
 
@@ -185,7 +185,9 @@ Keep a running list of all files written across all steps.
     - `outcome`: the final verdict string (e.g. `"approved"`, `"approved_with_notes"`, `"rejected_no_replan"`, `"high_risk"`, `"execution_failed"`)
     - `metadata_json`: a JSON string — `{"task":"<first 80 chars of task>","steps_planned":N,"files_written":N,"retries":N,"ollama_model":"<model or empty string>","claude_calls":{"opus":N,"fable":N,"sonnet":N,"haiku":N}}`
 
-16. Spawn a **Haiku agent** to call the `ollama-local open_metrics_dashboard` tool, then log its returned URL:
+16. **Token budget check** — spawn a **Haiku agent** to call `ollama-local check_token_budget` (limit 170000). If it reports any sub-agent over budget, surface the warning to the user verbatim (e.g. `⚠ planner: peak context ~210k tokens — exceeded the 170k budget; consider splitting the task`). The Planner and Reviewer carry the 170k context-budget instruction, but it is guidance the model may exceed; this check verifies it against the real transcript token counts after the run. (A skill cannot hard-cap a sub-agent's context, so this is a check-and-warn, not a hard stop.)
+
+17. Spawn a **Haiku agent** to call the `ollama-local open_metrics_dashboard` tool, then log its returned URL:
     ```
     Done. Metrics dashboard: http://localhost:8765 (read-only). For a text summary, ask: "Use the ollama-local get_metrics_summary tool."
     ```

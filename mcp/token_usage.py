@@ -163,6 +163,103 @@ def aggregate_real_usage(project_dir=None) -> dict:
     }
 
 
+def _agent_type_for(jsonl_path: str) -> str:
+    """Read the sibling <id>.meta.json to label a subagent transcript, else ''."""
+    meta = jsonl_path[:-len(".jsonl")] + ".meta.json" if jsonl_path.endswith(".jsonl") else ""
+    try:
+        with open(meta) as fh:
+            return json.load(fh).get("agentType", "") or ""
+    except OSError:
+        return ""
+    except json.JSONDecodeError:
+        return ""
+
+
+def peak_context_by_subagent(project_dir=None) -> list:
+    """
+    For each subagent transcript, the PEAK single-request context size
+    (input + cache_read + cache_creation tokens) — the largest working context
+    the agent held at once. This is the right metric for a per-subtask context
+    budget (vs. cumulative tokens, which double-counts cache reads).
+
+    Returns [{agent_type, model, peak_context_tokens, file}], newest file first.
+    """
+    if project_dir is None:
+        project_dir = find_active_project_dir()
+    rows = []
+    if not (project_dir and os.path.isdir(project_dir)):
+        return rows
+    sub_glob = os.path.join(project_dir, "**", "subagents", "agent-*.jsonl")
+    for path in sorted(glob.glob(sub_glob, recursive=True), key=lambda p: -os.path.getmtime(p)):
+        peak = 0
+        model = ""
+        for tier_unused, usage in _iter_assistant_usage(path):
+            ctx = (
+                int(usage.get("input_tokens", 0) or 0)
+                + int(usage.get("cache_read_input_tokens", 0) or 0)
+                + int(usage.get("cache_creation_input_tokens", 0) or 0)
+            )
+            peak = max(peak, ctx)
+        # model: read first assistant record's model
+        for line in _read_first_model(path):
+            model = line
+            break
+        if peak > 0:
+            rows.append({
+                "agent_type": _agent_type_for(path),
+                "model": model,
+                "peak_context_tokens": peak,
+                "file": os.path.basename(path),
+            })
+    return rows
+
+
+def _read_first_model(jsonl_path: str):
+    """Yield the model of the first assistant record (helper for labeling)."""
+    try:
+        with open(jsonl_path) as fh:
+            for line in fh:
+                try:
+                    rec = json.loads(line)
+                except json.JSONDecodeError:
+                    continue
+                msg = rec.get("message") or {}
+                if rec.get("type") == "assistant" and isinstance(msg, dict) and msg.get("model"):
+                    yield msg["model"]
+                    return
+    except OSError:
+        return
+
+
+def check_token_budget(limit_tokens: int = 170_000, project_dir=None) -> dict:
+    """
+    Check each subagent's peak context against a budget (default 170k tokens).
+    Returns {limit, checked, over_budget: [...], ok: bool}.
+    """
+    rows = peak_context_by_subagent(project_dir)
+    over = [r for r in rows if r["peak_context_tokens"] > limit_tokens]
+    return {
+        "limit_tokens": limit_tokens,
+        "checked": len(rows),
+        "over_budget": over,
+        "ok": not over,
+    }
+
+
+def summarize_token_budget(limit_tokens: int = 170_000, project_dir=None) -> str:
+    """Human-readable budget check for the CLI / MCP tool."""
+    result = check_token_budget(limit_tokens, project_dir)
+    if result["checked"] == 0:
+        return "No subagent transcripts found to check."
+    if result["ok"]:
+        return f"✓ All {result['checked']} subagent(s) within the {limit_tokens:,}-token context budget."
+    lines = [f"⚠ {len(result['over_budget'])} of {result['checked']} subagent(s) exceeded the {limit_tokens:,}-token context budget:"]
+    for r in result["over_budget"]:
+        label = r["agent_type"] or r["model"] or r["file"]
+        lines.append(f"  {label}: peak context ~{r['peak_context_tokens']:,} tokens")
+    return "\n".join(lines)
+
+
 def summarize_real_usage(project_dir=None) -> str:
     """Human-readable summary of real token usage for the CLI / MCP tool."""
     data = aggregate_real_usage(project_dir)

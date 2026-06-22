@@ -190,6 +190,13 @@ class TestSafeJoin:
 
 
 class TestRunOllamaCodingAgent:
+    @pytest.fixture(autouse=True)
+    def _stub_context_length(self):
+        # Stop the agent loop's /api/show context probe from consuming a mocked
+        # chat response; context behavior is covered in TestModelContextLength.
+        with patch.object(server, "_model_context_length", return_value=200000):
+            yield
+
     def test_writes_file_and_reports_it(self, tmp_path):
         # Round 1: model calls write_file. Round 2: model finishes (no tool calls).
         responses = [
@@ -275,6 +282,41 @@ class TestRunOllamaCodingAgent:
         data = json.loads(out)
         assert data["files_written"] == []
         assert not (tmp_path / "escape.py").exists()
+
+
+class TestModelContextLength:
+    def _show(self, ctx):
+        m = MagicMock(); m.raise_for_status.return_value = None
+        m.json.return_value = {"model_info": {"general.architecture": "granite",
+                                              "granite.context_length": ctx}}
+        return m
+
+    def test_reads_context_length(self):
+        with patch("httpx.post", return_value=self._show(131072)):
+            assert server._model_context_length("m:1b") == 131072
+
+    def test_unknown_when_missing(self):
+        m = MagicMock(); m.raise_for_status.return_value = None
+        m.json.return_value = {"model_info": {}}
+        with patch("httpx.post", return_value=m):
+            assert server._model_context_length("m:1b") is None
+
+    def test_context_warning_triggers_on_overflow(self):
+        with patch("httpx.post", return_value=self._show(1000)):
+            est, ctx, warn = server._context_warning("m:1b", prompt_chars=8000)  # ~2000 tokens > 1000
+        assert ctx == 1000
+        assert warn and "exceeds" in warn
+
+    def test_context_warning_silent_when_fits(self):
+        with patch("httpx.post", return_value=self._show(100000)):
+            est, ctx, warn = server._context_warning("m:1b", prompt_chars=4000)  # ~1000 tokens
+        assert warn == ""
+
+    def test_tool_reports_window(self):
+        with patch("httpx.get", return_value=MagicMock(json=lambda: {"models": [{"name": "m:1b"}]})):
+            with patch("httpx.post", return_value=self._show(8192)):
+                out = server.get_model_context_length("m:1b")
+        assert "8,192" in out
 
 
 class TestListModelsForSelection:
