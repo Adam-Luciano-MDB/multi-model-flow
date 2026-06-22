@@ -123,6 +123,10 @@ User task description
         │  [ollama-agent]: ollama runs its own tool-   │
         │                 calling loop, writes files   │
         │                 itself (→ worker on failure) │
+        │                                              │
+        │  if context > ollama window:                 │
+        │     haiku chunks → ollama gens each →        │
+        │     haiku stitches → SONNET checks step      │
         └──────────────┬───────────────────────────────┘
                        │ files_written
                        ▼
@@ -164,6 +168,7 @@ User task description
 | Execute (write)    | Worker   | `haiku`          | Per step — adapts Ollama output, writes files, signals done. Skipped when `[ollama-only]` or `[ollama-agent]` is set and Ollama is available |
 | Execute (agent)    | —        | Ollama (auto)    | Only with `[ollama-agent]` — the local model reads context and writes files via its own tool-calling loop, replacing the Haiku Worker for the step |
 | Review             | Reviewer | `sonnet`         | Always — quality bar without Opus cost                      |
+| Review (per-step)  | Reviewer | `sonnet`         | Per chunked step — when a step's context overflows the Ollama window, Sonnet verifies the stitched file |
 | Review (escalate)  | Reviewer | `opus`           | When Sonnet confidence < 8/10 — independent second opinion  |
 
 The workflow uses **tier aliases** (`opus`, `sonnet`, `haiku`, `fable`) rather
@@ -213,6 +218,32 @@ window from Ollama's `/api/show` and surfaces it:
 > actually allocates at runtime (`num_ctx`, often a smaller default) can differ.
 > mmf warns against the max; if you have a large-context model but see
 > truncation, raise `num_ctx` in your Ollama configuration.
+
+### When a step is too big for the Ollama window — chunk + Sonnet-check
+
+If a step's context (its `context_files` + instruction) won't fit the Ollama
+model's window, mmf doesn't just truncate or fall straight back to Haiku — it
+**chunks the step** so the local model can still do the work:
+
+1. `estimate_context_fit` flags the overflow before the step runs.
+2. **Haiku splits** the step into sub-tasks each sized to fit the window.
+3. **Ollama generates** each piece locally.
+4. **Haiku stitches** the pieces into the target file (reconciling imports,
+   de-duplicating, ordering).
+5. **Sonnet verifies that step** — because stitched-together code is the fragile
+   part, a per-step Sonnet review checks the assembled file for missing/duplicated
+   definitions, broken imports, and inconsistent signatures. If it rejects, Haiku
+   fixes once; if it still fails, the step falls back to a single Haiku Worker
+   writing the whole file.
+
+This per-step Sonnet check runs **only** for chunked (overflow) steps and is in
+addition to the final Phase 3 review. The `chunked_steps` count is recorded in
+the run metrics. Steps that fit the window are unaffected and run normally.
+
+> Caveat: chunking + stitching generated code is inherently riskier than a
+> single-shot write — that's exactly why the per-step Sonnet gate exists. For
+> large *outputs* (as opposed to large input context), the Planner producing
+> more, smaller steps is still the cleaner lever.
 
 ---
 
@@ -414,6 +445,7 @@ to use** above.
 - `ask_local_model_for_code(prompt, context, language, model)` — code-optimised wrapper; when `model` is omitted, resolves to the first installed model (no hardcoded preference)
 - `run_ollama_coding_agent(task, model, context, work_dir, max_iterations)` — runs a tool-calling loop where the local model reads/writes files itself (file access sandboxed to `work_dir`); powers the `[ollama-agent]` flag. Requires a tool-call-capable model.
 - `get_model_context_length(model)` — the model's max context window (tokens), read from Ollama `/api/show`; use it to know whether a model can hold a prompt before sending
+- `estimate_context_fit(paths_json, model, extra_chars)` — whether a set of context files (+ instruction) fits a model's window; drives the per-step chunking decision
 - `check_token_budget(limit_tokens=170000)` — post-run check of each sub-agent's **peak context** against a per-subtask token budget, parsed from transcripts; warns on overruns
 - `log_event` — append a metrics record to `metrics.jsonl`
 - `get_metrics_summary` — print the CLI metrics summary

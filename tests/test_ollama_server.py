@@ -319,6 +319,58 @@ class TestModelContextLength:
         assert "8,192" in out
 
 
+class TestEstimateContextFit:
+    def _show(self, ctx):
+        m = MagicMock(); m.raise_for_status.return_value = None
+        m.json.return_value = {"model_info": {"x.context_length": ctx}}
+        return m
+
+    def test_fits_when_small(self, tmp_path):
+        f = tmp_path / "a.py"; f.write_text("x" * 400)  # ~100 tokens
+        with patch("httpx.get", return_value=MagicMock(json=lambda: {"models": [{"name": "m:1b"}]})):
+            with patch("httpx.post", return_value=self._show(100000)):
+                out = json.loads(server.estimate_context_fit(json.dumps([str(f)]), "m:1b"))
+        assert out["fits"] is True
+        assert out["est_tokens"] == 100
+
+    def test_overflow_when_large(self, tmp_path):
+        f = tmp_path / "big.py"; f.write_text("x" * 40000)  # ~10000 tokens
+        with patch("httpx.get", return_value=MagicMock(json=lambda: {"models": [{"name": "m:1b"}]})):
+            with patch("httpx.post", return_value=self._show(2048)):
+                out = json.loads(server.estimate_context_fit(json.dumps([str(f)]), "m:1b"))
+        assert out["fits"] is False
+        assert out["context_window"] == 2048
+
+    def test_extra_chars_counted(self, tmp_path):
+        with patch("httpx.get", return_value=MagicMock(json=lambda: {"models": [{"name": "m:1b"}]})):
+            with patch("httpx.post", return_value=self._show(10)):
+                out = json.loads(server.estimate_context_fit(json.dumps([]), "m:1b", extra_chars=400))
+        assert out["est_tokens"] == 100  # 400 // 4
+        assert out["fits"] is False  # 100 > 10
+
+    def test_missing_files_reported_not_fatal(self, tmp_path):
+        with patch("httpx.get", return_value=MagicMock(json=lambda: {"models": [{"name": "m:1b"}]})):
+            with patch("httpx.post", return_value=self._show(100000)):
+                out = json.loads(server.estimate_context_fit(json.dumps(["/no/such/file.py"]), "m:1b"))
+        assert out["missing"] == ["/no/such/file.py"]
+        assert out["fits"] is True
+
+    def test_unknown_window_defaults_to_fits(self, tmp_path):
+        f = tmp_path / "a.py"; f.write_text("x" * 40000)
+        m = MagicMock(); m.raise_for_status.return_value = None
+        m.json.return_value = {"model_info": {}}  # no context_length
+        with patch("httpx.get", return_value=MagicMock(json=lambda: {"models": [{"name": "m:1b"}]})):
+            with patch("httpx.post", return_value=m):
+                out = json.loads(server.estimate_context_fit(json.dumps([str(f)]), "m:1b"))
+        assert out["context_window"] is None
+        assert out["fits"] is True  # can't prove overflow
+
+    def test_bad_json_errors(self):
+        with patch("httpx.get", return_value=MagicMock(json=lambda: {"models": [{"name": "m:1b"}]})):
+            out = server.estimate_context_fit("not-json", "m:1b")
+        assert out.startswith("ERROR")
+
+
 class TestListModelsForSelection:
     def test_numbered_list_marks_first_as_default(self):
         with patch("httpx.get", return_value=MagicMock(json=lambda: {

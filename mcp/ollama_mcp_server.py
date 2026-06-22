@@ -99,6 +99,50 @@ def _context_warning(model: str, prompt_chars: int):
 
 
 @mcp.tool()
+def estimate_context_fit(paths_json: str, model: str = "", extra_chars: int = 0) -> str:
+    """
+    Estimate whether a set of context files (plus `extra_chars` of instruction)
+    fits a model's context window. Used to decide whether a step must be chunked.
+
+    Args:
+        paths_json: JSON array of file paths whose sizes form the context.
+        model: Ollama model; empty resolves to the first installed model.
+        extra_chars: Additional chars (instruction/plan) to add to the estimate.
+
+    Returns JSON: {model, est_tokens, context_window, fits, missing}.
+    `fits` is true when the window is unknown (can't prove overflow).
+    """
+    model = _resolve_model(model)
+    if not model:
+        return "ERROR: no local models installed."
+    try:
+        paths = json.loads(paths_json)
+        if not isinstance(paths, list):
+            raise ValueError
+    except (json.JSONDecodeError, ValueError):
+        return f"ERROR: paths_json must be a JSON array, got {paths_json!r}"
+
+    total_chars = max(0, int(extra_chars))
+    missing = []
+    for p in paths:
+        try:
+            total_chars += os.path.getsize(p)
+        except OSError:
+            missing.append(p)
+
+    est_tokens = total_chars // 4
+    ctx = _model_context_length(model)
+    fits = ctx is None or est_tokens <= ctx
+    return json.dumps({
+        "model": model,
+        "est_tokens": est_tokens,
+        "context_window": ctx,
+        "fits": fits,
+        "missing": missing,
+    })
+
+
+@mcp.tool()
 def get_model_context_length(model: str = "") -> str:
     """
     Report a local model's maximum context window (tokens), read from Ollama's

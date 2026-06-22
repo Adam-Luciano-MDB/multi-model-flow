@@ -111,7 +111,23 @@ Keep a running list of all files written across all steps.
 
 10. For each step in `plan.steps`, in order:
 
-    **a0. Ollama agentic worker** (only when `ollamaAgent` is set AND OLLAMA_MODEL is set) — the local model does the tool calling itself, replacing the Haiku Worker for this step:
+    **Context-fit pre-check** (only if OLLAMA_MODEL is set): spawn a **Haiku agent** to call `ollama-local estimate_context_fit` with `paths_json` = the step's `context_files`, `model` = OLLAMA_MODEL, and `extra_chars` = length of the step instruction. Read the returned `fits` flag.
+    - If `fits` is true (or no context_files) → proceed to the normal path (a0 / a / b below).
+    - If `fits` is **false** — the step's context exceeds the Ollama model's window → use the **chunked path with per-step Sonnet check** below instead of a0/a/b.
+
+    **a-chunk. Chunked execution (context overflow)** — Haiku splits the work, Ollama generates each piece, Haiku stitches, Sonnet verifies the step:
+    1. Spawn a **Haiku agent** to split the step into an ordered list of sub-tasks, each whose required context (a subset of `context_files`, or one logical section/function group) fits within the OLLAMA_MODEL window reported by `estimate_context_fit`. Track this chunk plan.
+    2. For each sub-task in order: spawn a **Haiku agent** that calls `ollama-local ask_local_model_for_code` with only that sub-task's reduced context and instruction. Collect each returned piece.
+    3. Spawn a **Haiku agent** to **stitch** the pieces into the complete `target_file` — reconciling imports, removing duplication, ordering definitions — and write the file with the Write tool. Add it to the tracked list.
+    4. **Per-step Sonnet check** — spawn a **Reviewer agent** (`agentType: reviewer`, which is Sonnet) scoped to THIS step only:
+       > "Verify the file written for step STEP_ID against its instruction. This file was assembled from multiple chunks, so focus on stitch integrity: missing or duplicated definitions, broken or duplicate imports, inconsistent signatures across pieces, and whether the whole satisfies the step instruction. Return a JSON verdict {verdict, issues:[...]}."
+       - If the verdict is `approved`/`approved_with_notes`: log `chunked: STEP_ID built from N pieces, Sonnet-checked ✓` and continue to the next step.
+       - If `rejected`: spawn a **Haiku agent** to fix the listed issues in the file (one attempt). If a re-check still fails, fall back to a single **Worker agent** (`agentType: worker`) writing the whole `target_file` directly (Haiku, no chunking), and note the fallback.
+    5. This per-step Sonnet check is **in addition** to the final Phase 3 review, and only runs for chunked (overflow) steps. Count these Sonnet calls toward the sonnet tier in Phase 4 metrics, and record the chunk count.
+
+    Skip a0/a/b for a step handled by a-chunk.
+
+    **a0. Ollama agentic worker** (only when `ollamaAgent` is set AND OLLAMA_MODEL is set, and the step fit the context window) — the local model does the tool calling itself, replacing the Haiku Worker for this step:
     - Spawn a **Haiku agent** as a thin driver whose only job is to call the `ollama-local run_ollama_coding_agent` MCP tool with:
       - `task`: the step `instruction` plus `target_file` and a note to read any `context_files` first
       - `context`: the plan JSON (or the relevant slice)
@@ -176,14 +192,14 @@ Keep a running list of all files written across all steps.
 14. Count how many times you spawned each model tier across all phases:
     - **opus**: planner + any Opus strengthener + any Opus review escalation
     - **fable**: any Fable strengthener
-    - **sonnet**: reviewer
-    - **haiku**: Ollama probe + any Ollama step drivers + workers + metrics call
+    - **sonnet**: final reviewer + one per-step Sonnet check for each chunked (context-overflow) step
+    - **haiku**: Ollama probe + any Ollama step drivers + workers + chunk split/stitch/fix agents + metrics call
 
 15. Spawn a **Haiku agent** to call `ollama-local log_event` with:
     - `phase`: `"workflow"`
     - `model`: the tiers actually used, joined with `+` (e.g. `"opus+devstral+haiku+sonnet"`)
     - `outcome`: the final verdict string (e.g. `"approved"`, `"approved_with_notes"`, `"rejected_no_replan"`, `"high_risk"`, `"execution_failed"`)
-    - `metadata_json`: a JSON string — `{"task":"<first 80 chars of task>","steps_planned":N,"files_written":N,"retries":N,"ollama_model":"<model or empty string>","claude_calls":{"opus":N,"fable":N,"sonnet":N,"haiku":N}}`
+    - `metadata_json`: a JSON string — `{"task":"<first 80 chars of task>","steps_planned":N,"files_written":N,"retries":N,"chunked_steps":N,"ollama_model":"<model or empty string>","claude_calls":{"opus":N,"fable":N,"sonnet":N,"haiku":N}}`
 
 16. **Token budget check** — spawn a **Haiku agent** to call `ollama-local check_token_budget` (limit 170000). If it reports any sub-agent over budget, surface the warning to the user verbatim (e.g. `⚠ planner: peak context ~210k tokens — exceeded the 170k budget; consider splitting the task`). The Planner and Reviewer carry the 170k context-budget instruction, but it is guidance the model may exceed; this check verifies it against the real transcript token counts after the run. (A skill cannot hard-cap a sub-agent's context, so this is a check-and-warn, not a hard stop.)
 
