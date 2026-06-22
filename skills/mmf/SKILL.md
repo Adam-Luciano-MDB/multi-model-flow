@@ -55,7 +55,7 @@ Make a numbered todo list covering all four phases before you start, then tick o
    - **Otherwise**: present the installed models as a numbered selection list (using the `ollama-local list_models_for_selection` tool, or the candidate log above) with the auto-selected model marked as the recommended default, and ask the user which to use via AskUserQuestion. Offer the recommended model as the first option. If the user picks a different one, set OLLAMA_MODEL to it; if they accept the default or don't answer, keep the computed pick.
 
 5. Log the outcome:
-   - Ollama available: update the banner — `worker: haiku + OLLAMA_MODEL`. Then spawn a **Haiku agent** to call `ollama-local get_model_context_length` for OLLAMA_MODEL and append its context window to the banner (e.g. `worker: haiku + granite4:7b-a1b-h (ctx ~131k)`) so you and the user know how much the local model can hold. If unknown, omit silently.
+   - Ollama available: update the banner — `worker: haiku + OLLAMA_MODEL`. Then spawn a **Haiku agent** to call `ollama-local get_model_context_length` for OLLAMA_MODEL and append its context window to the banner (e.g. `worker: haiku + granite4:7b-a1b-h (ctx ~1.0M)`) so you and the user know how much the local model can hold. If unknown, omit silently.
    - Ollama offline: `Ollama not available — Worker will use Haiku for all generation`
 
 6. (Optional) If the user mentioned needing hardware recommendations or model selection, warn them first:
