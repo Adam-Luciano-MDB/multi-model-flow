@@ -521,7 +521,9 @@ INDEX_HTML = """<!DOCTYPE html>
             const data = Object.values(outcomeCounts);
             const colors = {
                 'approved': '#28a745',
+                'approved_with_notes': '#8bc34a',
                 'rejected': '#dc3545',
+                'test_gate_failed': '#b71c1c',
                 'error': '#fd7e14',
                 'execution_failed': '#6c757d',
             };

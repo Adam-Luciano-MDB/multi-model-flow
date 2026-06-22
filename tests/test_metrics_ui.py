@@ -163,6 +163,11 @@ class TestIndexHtml:
         html = metrics_ui.INDEX_HTML
         assert "MariaDB Multi-Model-Flow Metrics Dashboard" in html
 
+    def test_test_gate_failed_has_outcome_color(self):
+        # The hard-test-gate outcome must render as a failure color, not the default.
+        html = metrics_ui.INDEX_HTML
+        assert "'test_gate_failed':" in html
+
     def test_user_controlled_fields_are_html_escaped(self):
         # Regression guard: stored XSS via task/outcome/model name. If a future
         # edit drops escapeHtml() around any of these interpolations, this fails.

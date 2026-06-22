@@ -182,7 +182,7 @@ Keep a running list of all files written across all steps.
 
 13. **Hard test gate (enforced here, not just trusted to the reviewer)** — inspect `verdict.tests` before honoring `verdict.verdict`:
     - If `tests.found` is true AND `tests.ran` is true AND (`tests.exit_code` is non-zero OR `tests.failed > 0`): **treat the run as `rejected` regardless of what `verdict.verdict` says.** Log `✗ Test gate FAILED — N test(s) failing; cannot approve.` with the `tests.output_excerpt`, set `new_plan_needed` true, and use the failing-test output as the replanning note.
-    - If `tests.found` is true but `tests.ran` is false (suite exists, couldn't run): do **not** approve — log `✗ Test gate could not run the existing suite — blocking.` and treat as `rejected` (manual intervention).
+    - If `tests.found` is true but `tests.ran` is false (suite exists, couldn't run): do **not** approve — log `✗ Test gate could not run the existing suite — blocking.` and treat as `rejected` with `new_plan_needed: false` (this is an environment/tooling issue, not a plan issue — replanning won't fix it; report for manual intervention).
     - If `tests.found` is false (no suite): log `⚠ No test suite found — nothing to gate on; approving on review alone.` and continue with the reviewer's verdict.
     - If `tests.ran` is true and passed (`exit_code` 0, no failures): log `✓ Test gate passed (N tests)` and continue.
 
