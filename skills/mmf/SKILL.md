@@ -175,20 +175,33 @@ Keep a running list of all files written across all steps.
     >
     > Run the test suite (this is a mandatory, blocking gate — capture the real exit code with `; echo \"EXIT:$?\"`). Read each file and return your verdict JSON, including the required `tests` object. If any test fails, the verdict MUST be `rejected`."
 
-12. **Confidence escalation** — if `verdict.confidence < 8`:
+12. **Confidence escalation** — if `verdict.confidence < 8` **AND `verdict.tests` does not show a test failure** (when tests have failed, skip this — the gate + lighter fix loop in step 13 handles it; don't spend Opus on a run already headed into the cheap fix loop):
     Spawn a second **Reviewer agent** (`model: opus`) with the same prompt plus:
     > "Note: A Sonnet reviewer scored this N/10 confidence. Please give it a thorough independent review and return your own verdict JSON."
     Use the Opus verdict going forward.
 
 13. **Hard test gate (enforced here, not just trusted to the reviewer)** — inspect `verdict.tests` before honoring `verdict.verdict`:
-    - If `tests.found` is true AND `tests.ran` is true AND (`tests.exit_code` is non-zero OR `tests.failed > 0`): **treat the run as `rejected` regardless of what `verdict.verdict` says.** Log `✗ Test gate FAILED — N test(s) failing; cannot approve.` with the `tests.output_excerpt`, set `new_plan_needed` true, and use the failing-test output as the replanning note.
-    - If `tests.found` is true but `tests.ran` is false (suite exists, couldn't run): do **not** approve — log `✗ Test gate could not run the existing suite — blocking.` and treat as `rejected` with `new_plan_needed: false` (this is an environment/tooling issue, not a plan issue — replanning won't fix it; report for manual intervention).
-    - If `tests.found` is false (no suite): log `⚠ No test suite found — nothing to gate on; approving on review alone.` and continue with the reviewer's verdict.
-    - If `tests.ran` is true and passed (`exit_code` 0, no failures): log `✓ Test gate passed (N tests)` and continue.
+    - **PASS** — `tests.ran` true, `exit_code` 0, no failures: log `✓ Test gate passed (N tests)` and continue to step 14.
+    - **NO SUITE** — `tests.found` false: log `⚠ No test suite found — nothing to gate on; approving on review alone.` and continue to step 14 on the reviewer's verdict.
+    - **CAN'T RUN** — `tests.found` true but `tests.ran` false (suite exists, env/tooling error): do **not** approve — log `✗ Test gate could not run the existing suite — blocking.`; treat as `rejected` with `new_plan_needed: false` (replanning won't fix tooling) and go to step 14 for manual intervention.
+    - **FAIL** — `tests.found` true AND `tests.ran` true AND (`exit_code` non-zero OR `tests.failed > 0`): **never approve.** Log `✗ Test gate FAILED — N test(s) failing.` and enter the **lighter fix loop** below *before* any full re-plan.
 
-14. **Verdict** (after the test gate):
+    **13a. Lighter fix loop — Sonnet guides, Haiku/Ollama fixes (≤ 2 attempts, runs before a full re-plan):**
+    A test failure is usually a localized bug, not a bad plan — so try a cheap targeted fix before re-planning with Opus. For each attempt (max 2):
+    1. **Sonnet guidance** — spawn a **Sonnet agent** (`model: sonnet`):
+       > "The test suite is failing. Failing-test output: TESTS_OUTPUT_EXCERPT. Relevant files: FILE_LIST. Diagnose the root cause and return JSON `{diagnosis, target_files:[...], fix_instructions:"the concrete change to make"}`. Pinpoint the minimal fix — do not rewrite from scratch."
+    2. **Apply the fix with the cheapest available implementer** (not Opus):
+       - If OLLAMA_MODEL is set: spawn a **Haiku agent** to call `ollama-local ask_local_model_for_code` (or `run_ollama_coding_agent` when `[ollama-agent]`) with the current file content + Sonnet's `fix_instructions`, then write the corrected `target_files`.
+       - Otherwise: spawn a **Worker agent** (`agentType: worker`, Haiku) to apply `fix_instructions` to `target_files`.
+    3. **Re-test** — spawn a **Haiku agent** to re-run the suite, capturing the real exit code (`; echo "EXIT:$?"`).
+    4. If tests now **pass**: spawn a final **Reviewer agent** (`agentType: reviewer`, Sonnet) to verdict the fixed code, then go to step 14 with that verdict. Done.
+    5. If still **failing**: repeat (up to the 2-attempt cap).
+
+    If the lighter loop is exhausted (still failing after 2 attempts): **escalate to a full re-plan** — set `new_plan_needed: true`, feed the failing-test output **and** Sonnet's diagnoses as the replanning note, and proceed to step 14's replan branch.
+
+14. **Verdict** (after the test gate and any lighter fix loop):
     - `approved` or `approved_with_notes` (and the test gate did not fail): log the list of files built, show any non-blocking suggestions, then proceed to Phase 4.
-    - `rejected` with `new_plan_needed: true` (including a test-gate failure): append `verdict.replanning_notes` (or the failing-test output) to the original task description and repeat from **Phase 1**. Maximum **2 replans total** (3 attempts). If the cap is hit, stop and report the blocking issues (and failing tests).
+    - `rejected` with `new_plan_needed: true` (a test-gate failure that survived the lighter loop, or a non-test rejection needing replanning): append `verdict.replanning_notes` (or the failing-test output + Sonnet diagnoses) to the original task description and repeat from **Phase 1**. Maximum **2 full replans (3 plan attempts)** — separate from the lighter-loop cap. If the cap is hit, stop and report the blocking issues (and failing tests).
     - `rejected` without `new_plan_needed`: stop and report the blocking issues. Manual intervention required.
 
 ---
@@ -198,14 +211,14 @@ Keep a running list of all files written across all steps.
 15. Count how many times you spawned each model tier across all phases:
     - **opus**: planner + any Opus strengthener + any Opus review escalation
     - **fable**: any Fable strengthener
-    - **sonnet**: final reviewer + one per-step Sonnet check for each chunked (context-overflow) step
-    - **haiku**: Ollama probe + any Ollama step drivers + workers + chunk split/stitch/fix agents + metrics call
+    - **sonnet**: final reviewer + one per-step Sonnet check for each chunked (context-overflow) step + each lighter-fix-loop guidance call + each post-fix re-review
+    - **haiku**: Ollama probe + any Ollama step drivers + workers + chunk split/stitch/fix agents + lighter-fix applies + re-test runs + metrics call
 
 16. Spawn a **Haiku agent** to call `ollama-local log_event` with:
     - `phase`: `"workflow"`
     - `model`: the tiers actually used, joined with `+` (e.g. `"opus+devstral+haiku+sonnet"`)
     - `outcome`: the final verdict string (e.g. `"approved"`, `"approved_with_notes"`, `"rejected_no_replan"`, `"test_gate_failed"`, `"high_risk"`, `"execution_failed"`)
-    - `metadata_json`: a JSON string — `{"task":"<first 80 chars of task>","steps_planned":N,"files_written":N,"retries":N,"chunked_steps":N,"tests_passed":true|false|null,"ollama_model":"<model or empty string>","claude_calls":{"opus":N,"fable":N,"sonnet":N,"haiku":N}}`
+    - `metadata_json`: a JSON string — `{"task":"<first 80 chars of task>","steps_planned":N,"files_written":N,"retries":N,"chunked_steps":N,"lighter_fix_attempts":N,"tests_passed":true|false|null,"ollama_model":"<model or empty string>","claude_calls":{"opus":N,"fable":N,"sonnet":N,"haiku":N}}`
 
 17. **Token budget check** — spawn a **Haiku agent** to call `ollama-local check_token_budget` (limit 170000). If it reports any sub-agent over budget, surface the warning to the user verbatim (e.g. `⚠ planner: peak context ~210k tokens — exceeded the 170k budget; consider splitting the task`). The Planner and Reviewer carry the 170k context-budget instruction, but it is guidance the model may exceed; this check verifies it against the real transcript token counts after the run. (A skill cannot hard-cap a sub-agent's context, so this is a check-and-warn, not a hard stop.)
 

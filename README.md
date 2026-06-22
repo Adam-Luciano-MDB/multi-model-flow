@@ -20,6 +20,10 @@ Once installed, invoke it from any project with the **`/mmf`** slash command.
 - **Hard test gate** — the reviewer must run the test suite; if any test fails
   the run is forced to `rejected` and cannot be approved (enforced in Phase 3,
   not left to the reviewer's discretion).
+- **Tiered recovery on test failure** — a failure first triggers a cheap
+  **Sonnet-guided fix loop** (Sonnet diagnoses, Haiku or the Ollama model applies
+  the fix, re-test) before escalating to a full Opus re-plan — fixing localized
+  bugs without paying for a fresh plan.
 
 Drop it into any codebase; it is framework and language agnostic.
 
@@ -137,12 +141,18 @@ User task description
         └──────────────┬───────────────────────────────┘
                        │ files_written
                        ▼
-             ┌──────────────────────────┐
-             │  Reviewer (sonnet)       │
-             │  HARD TEST GATE:         │
-             │  run suite → fail =      │
-             │  rejected (no override)  │
-             └─────────┬────────────────┘
+             ┌──────────────────────────────────────┐
+             │  Reviewer (sonnet)                   │
+             │  HARD TEST GATE: run suite           │
+             │  pass → continue                     │
+             │  fail → tiered recovery:             │
+             │    1) lighter fix loop (≤2):         │
+             │       sonnet diagnoses →             │
+             │       ollama/haiku applies →         │
+             │       re-test                        │
+             │    2) still failing → full opus      │
+             │       re-plan (≤2) → Phase 1         │
+             └─────────┬────────────────────────────┘
                confidence score 1–10
                         │
              ┌──────────▼──────────┐
@@ -860,10 +870,18 @@ escalates to Opus for an independent second review before accepting the verdict.
 running the suite is mandatory (the reviewer captures the real exit code via
 `; echo "EXIT:$?"`). If a suite exists and any test fails, the verdict is forced
 to `rejected` — and Phase 3 enforces this at the orchestration level too, so a
-run **cannot be approved with failing tests** even if the reviewer slips. A
-failing gate feeds the failing-test output back into a replan (up to the retry
-cap). If no test suite exists, the gate has nothing to enforce and the run
-proceeds on review judgment with a "ships without tests" note.
+run **cannot be approved with failing tests** even if the reviewer slips. If no
+test suite exists, the gate has nothing to enforce and the run proceeds on review
+judgment with a "ships without tests" note.
+
+**Tiered recovery.** A failing gate doesn't jump straight to an expensive
+re-plan. It first runs a **lighter fix loop** (≤ 2 attempts): **Sonnet** diagnoses
+the failure and returns a targeted `fix_instructions`, then the **cheapest
+implementer** applies it — the **Ollama model** if one is in use, otherwise the
+**Haiku Worker** — and the suite is re-run. Only if the lighter loop can't make
+tests pass does the run escalate to a full **Opus re-plan** (capped at 2 replans,
+separately from the lighter-loop cap). This fixes localized bugs cheaply and
+reserves Opus for genuinely bad plans.
 
 ---
 
