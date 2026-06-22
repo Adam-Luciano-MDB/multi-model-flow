@@ -371,19 +371,23 @@ def run_ollama_coding_agent(
                         files_written.append(rel)
                 messages.append({"role": "tool", "content": result})
     except httpx.ConnectError:
+        status = "error"
         return "ERROR: Ollama is not running. Start it with `ollama serve` and retry."
     except httpx.HTTPStatusError as e:
+        status = "error"
         return (f"ERROR: Ollama rejected the request (HTTP {e.response.status_code}). "
                 f"The model '{model}' may not support tool calling — use a tool-capable model.")
     except httpx.TimeoutException:
+        status = "error"
         return f"ERROR: Ollama agent timed out after {TIMEOUT}s."
     except Exception as e:
+        status = "error"
         return f"ERROR: {e}"
     finally:
         _append_metric({
             "phase": "ollama_agent",
             "model": model,
-            "outcome": "error" if not files_written and status == "no_tool_calls" else status,
+            "outcome": status,
             "meta": {"files_written": len(files_written), "duration_ms": int((time.time() - t0) * 1000)},
         })
 
