@@ -466,6 +466,14 @@ A skill can't see the token counts of the sub-agents it spawns (that's harness
 telemetry), so this is the only way to get true per-tier numbers — it reads them
 off disk after the fact rather than estimating.
 
+> **Scope:** the real-token figures are **cumulative across every Claude Code
+> session in the active project** (the most-recently-used transcript directory),
+> not scoped to individual `/mmf` runs. This parallels how `metrics.jsonl`
+> accumulates over time. So the "Real Claude Cost" includes all of your Claude
+> Code usage in that project — including ad-hoc chats and other skills — not just
+> multi-model-flow. Treat it as a project-level total, and use the per-run
+> `workflow` records (estimated Claude calls) when you need per-mmf-run attribution.
+
 **What the metrics tell you:**
 - `steps_planned` vs `files_written` — if files < steps, some steps wrote nothing (check worker output)
 - `retries` > 0 — task descriptions that caused reviewer rejection; tighten the description or CLAUDE.md
