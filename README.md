@@ -532,7 +532,36 @@ Use the ollama-local open_metrics_dashboard tool.
 This starts a read-only server in the background on `http://127.0.0.1:8765` and
 returns the URL. It resolves the bundled UI relative to the plugin, so you don't
 need to know where the plugin is installed. If a server is already running on the
-port, it reuses it. (The `/mmf` skill calls this automatically at the end of a run.)
+port, it reuses it. (The `/mmf` skill calls this automatically at the start of a run.)
+
+#### Auto-launch blocked under auto-approval mode
+
+Because the dashboard tool **spawns a background server process**, Claude Code's
+permission classifier won't auto-approve it in fully automatic (auto-accept /
+headless) sessions — you'll see `Metrics dashboard unavailable …` and the run
+continues without it (metrics are still recorded; only the viewer is skipped).
+In a normal interactive session you'll instead get a one-time permission prompt —
+choose "always allow" and it's remembered.
+
+To make it launch automatically **everywhere**, add the tool to your **global**
+allow-list (`~/.claude/settings.json`) — Claude won't edit this file for you
+(modifying permission grants is a protected action), so add it yourself:
+
+```jsonc
+{
+  "permissions": {
+    "allow": [
+      "mcp__plugin_multi-model-flow_ollama-local__open_metrics_dashboard"
+    ]
+  }
+}
+```
+
+Restart Claude Code afterward. (A project-scoped `.claude/settings.json` works too,
+but only for that project — the global file covers every directory you run `/mmf`
+in.) The skill also declares this tool in its `allowed-tools`, which pre-authorizes
+it in interactive sessions; the explicit allow rule is what unblocks fully
+automatic ones.
 
 To stop it later:
 
