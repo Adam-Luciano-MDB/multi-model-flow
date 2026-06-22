@@ -8,6 +8,11 @@ when available — no configuration required.
 
 Once installed, invoke it from any project with the **`/mmf`** slash command.
 
+> 📄 **At-a-glance overview:** [`mmf-plugin.htm`](mmf-plugin.htm) is a single-page
+> visual reference (features, pipeline, flags, install). Open it locally, or view
+> the rendered page via
+> [htmlpreview](https://htmlpreview.github.io/?https://github.com/Adam-Luciano-MDB/multi-model-flow/blob/main/mmf-plugin.htm).
+
 - **Ollama auto-detect** — at the start of every run the skill probes Ollama.
   If a local model is running, it pre-generates code for each
   step; the Haiku Worker adapts and writes the final file. Falls back to

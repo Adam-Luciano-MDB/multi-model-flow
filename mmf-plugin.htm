@@ -1,0 +1,232 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Multi-Model-Flow — Claude Code Plugin</title>
+<style>
+  :root{
+    --teal:#0b3a45; --teal2:#12525f; --accent:#e07a5f; --accent2:#3d9aa1;
+    --ink:#1c2b30; --muted:#5b6b70; --bg:#f5f3ee; --card:#ffffff; --line:#e2ddd3;
+    --ok:#2e8b57; --warn:#c9772f;
+  }
+  *{box-sizing:border-box;margin:0;padding:0}
+  body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+    color:var(--ink);background:var(--bg);line-height:1.55}
+  code,pre{font-family:"SF Mono",ui-monospace,Menlo,Consolas,monospace}
+  a{color:var(--accent2);text-decoration:none}
+  a:hover{text-decoration:underline}
+  .wrap{max-width:980px;margin:0 auto;padding:0 22px}
+
+  header{background:linear-gradient(135deg,var(--teal),var(--teal2));color:#fff;padding:54px 0 46px}
+  header .wrap{display:flex;flex-direction:column;gap:14px}
+  .badge{display:inline-block;font-size:12px;letter-spacing:.08em;text-transform:uppercase;
+    background:rgba(255,255,255,.14);padding:5px 11px;border-radius:20px;align-self:flex-start}
+  h1{font-size:42px;line-height:1.1;font-weight:800;letter-spacing:-.5px}
+  h1 .mono{font-family:"SF Mono",ui-monospace,Menlo,monospace;color:#ffd9a8}
+  .tag{font-size:19px;color:#dceef0;max-width:680px}
+  .pills{display:flex;flex-wrap:wrap;gap:8px;margin-top:6px}
+  .pill{background:rgba(255,255,255,.12);border:1px solid rgba(255,255,255,.18);
+    padding:5px 12px;border-radius:18px;font-size:13px}
+  .cta{display:flex;gap:12px;flex-wrap:wrap;margin-top:18px}
+  .btn{background:var(--accent);color:#fff;padding:11px 20px;border-radius:8px;font-weight:600;font-size:15px}
+  .btn.ghost{background:rgba(255,255,255,.1);border:1px solid rgba(255,255,255,.3)}
+  .install{margin-top:20px;background:rgba(0,0,0,.28);border-radius:10px;padding:14px 16px;
+    font-size:14px;overflow-x:auto}
+  .install .c{color:#9fe0c7}.install .p{color:#7fb0bb}
+
+  section{padding:46px 0}
+  section:nth-child(even){background:#fffdf8;border-top:1px solid var(--line);border-bottom:1px solid var(--line)}
+  h2{font-size:27px;font-weight:750;margin-bottom:6px;color:var(--teal)}
+  .sub{color:var(--muted);margin-bottom:26px;max-width:720px}
+
+  .grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:18px}
+  .card{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:20px}
+  .card h3{font-size:16px;margin-bottom:7px;display:flex;align-items:center;gap:8px}
+  .card .ic{width:30px;height:30px;border-radius:8px;background:#eef4f3;display:inline-flex;
+    align-items:center;justify-content:center;font-size:16px}
+  .card p{font-size:14px;color:var(--muted)}
+
+  .flow{display:flex;flex-direction:column;gap:10px;align-items:stretch;max-width:560px;margin:0 auto}
+  .node{background:var(--card);border:1px solid var(--line);border-left:5px solid var(--accent2);
+    border-radius:10px;padding:14px 16px}
+  .node b{display:block;font-size:15px}
+  .node small{color:var(--muted);font-size:13px}
+  .node.plan{border-left-color:#7e57c2}.node.exec{border-left-color:var(--accent)}
+  .node.review{border-left-color:var(--accent2)}.node.metrics{border-left-color:var(--ok)}
+  .arrow{text-align:center;color:var(--muted);font-size:18px;line-height:1}
+
+  table{width:100%;border-collapse:collapse;background:var(--card);border:1px solid var(--line);
+    border-radius:10px;overflow:hidden;font-size:14px}
+  th,td{text-align:left;padding:11px 14px;border-bottom:1px solid var(--line);vertical-align:top}
+  th{background:#eef4f3;color:var(--teal);font-weight:650}
+  tr:last-child td{border-bottom:none}
+  td code{background:#f1ede4;padding:2px 6px;border-radius:5px;font-size:13px}
+
+  pre.block{background:#0b3a45;color:#e7f0ee;border-radius:10px;padding:16px 18px;overflow-x:auto;
+    font-size:13.5px;line-height:1.6}
+  pre.block .c{color:#9fe0c7}.block .p{color:#86a9b2}.block .y{color:#ffd9a8}
+
+  .cols2{display:grid;grid-template-columns:1fr 1fr;gap:18px}
+  @media(max-width:680px){.cols2{grid-template-columns:1fr}h1{font-size:33px}}
+
+  .tools{columns:2;column-gap:24px;font-size:14px}
+  .tools li{margin-bottom:7px;break-inside:avoid;list-style:none}
+  .tools code{background:#f1ede4;padding:1px 6px;border-radius:5px}
+  @media(max-width:680px){.tools{columns:1}}
+
+  footer{background:var(--teal);color:#cfe3e6;padding:30px 0;font-size:14px}
+  footer a{color:#ffd9a8}
+  .note{font-size:13px;color:var(--muted);margin-top:14px}
+</style>
+</head>
+<body>
+
+<header>
+  <div class="wrap">
+    <span class="badge">Claude Code Plugin · v0.1.0</span>
+    <h1>Multi-Model-Flow <span class="mono">/mmf</span></h1>
+    <p class="tag">A Planner → Worker → Reviewer pipeline for Claude Code that routes bulk
+      implementation to cheap models — Opus plans, Haiku &amp; local Ollama implement, Sonnet
+      reviews — so you spend Opus only where it pays off.</p>
+    <div class="pills">
+      <span class="pill">Opus plans</span>
+      <span class="pill">Haiku / Ollama implement</span>
+      <span class="pill">Sonnet reviews</span>
+      <span class="pill">Hard test gate</span>
+      <span class="pill">Local-model offload</span>
+      <span class="pill">Cost metrics dashboard</span>
+    </div>
+    <div class="cta">
+      <a class="btn" href="https://github.com/Adam-Luciano-MDB/multi-model-flow">View on GitHub →</a>
+      <a class="btn ghost" href="#install">Install</a>
+    </div>
+    <pre class="install"><span class="p"># clone, then one command installs the plugin everywhere</span>
+git clone https://github.com/Adam-Luciano-MDB/multi-model-flow.git
+cd multi-model-flow &amp;&amp; ./scripts/setup_mcp.sh <span class="c">--global</span></pre>
+  </div>
+</header>
+
+<!-- WHAT -->
+<section>
+  <div class="wrap">
+    <h2>What it is</h2>
+    <p class="sub">One slash command runs a three-phase pipeline. Each phase uses the
+      cheapest model that can do the job well, and the expensive tiers are reserved for the
+      decisions that actually need them.</p>
+    <div class="flow">
+      <div class="node plan"><b>① Plan — Opus</b><small>Decomposes the task into a JSON execution plan with a confidence score. Low confidence → Fable/Opus strengthens it. High risk → pauses for confirmation (unless <code>[auto]</code>).</small></div>
+      <div class="arrow">↓</div>
+      <div class="node exec"><b>② Execute — Haiku + local Ollama</b><small>Smart-selects the best installed Ollama model, generates each step locally, and the Haiku Worker adapts &amp; writes. Oversized steps are chunked; Sonnet checks each chunked step.</small></div>
+      <div class="arrow">↓</div>
+      <div class="node review"><b>③ Review — Sonnet (→ Opus)</b><small>Hard test gate: the suite must pass or the run is rejected. Escalates to Opus only when confidence is low. Failures trigger a cheap Sonnet-guided fix loop before any re-plan.</small></div>
+      <div class="arrow">↓</div>
+      <div class="node metrics"><b>④ Metrics</b><small>Logs the run, checks the 170k token budget, and opens a local cost dashboard with real per-tier token usage and Ollama savings.</small></div>
+    </div>
+  </div>
+</section>
+
+<!-- FEATURES -->
+<section>
+  <div class="wrap">
+    <h2>Primary features</h2>
+    <p class="sub">Everything is designed around one goal: get production-quality output while
+      keeping the expensive models out of routine work.</p>
+    <div class="grid">
+      <div class="card"><h3><span class="ic">💸</span>Cost-optimised routing</h3><p>Opus only plans &amp; reviews high-risk diffs; Haiku and local Ollama do the bulk implementation. Tier aliases auto-track the latest models.</p></div>
+      <div class="card"><h3><span class="ic">🖥️</span>Local Ollama offload</h3><p>Three Worker modes: <b>default</b> (Haiku adapts an Ollama draft), <code>[ollama-only]</code> (verbatim write), and <code>[ollama-agent]</code> (the local model drives the step via its own tool-calling loop).</p></div>
+      <div class="card"><h3><span class="ic">🎯</span>Smart model selection</h3><p>At probe time it scores your installed models for coding via llm-checker and picks the best one — no hardcoded model names. Pin one with <code>[model:…]</code>.</p></div>
+      <div class="card"><h3><span class="ic">📐</span>Context-aware chunking</h3><p>Detects each Ollama model's context window. If a step won't fit, Haiku splits it → Ollama generates the pieces → Haiku stitches → Sonnet verifies the stitched step.</p></div>
+      <div class="card"><h3><span class="ic">✅</span>Hard test gate</h3><p>The reviewer must run the test suite. If any test fails, the run is forced to <b>rejected</b> — enforced at the orchestration level, never approved with failing tests.</p></div>
+      <div class="card"><h3><span class="ic">🔧</span>Tiered failure recovery</h3><p>A test failure first triggers a cheap Sonnet-guided fix loop (Haiku/Ollama applies the fix) before escalating to a full Opus re-plan — fixing localized bugs without paying for a new plan.</p></div>
+      <div class="card"><h3><span class="ic">📊</span>Cost metrics dashboard</h3><p>A local read-only dashboard compares actual mixed-tier cost vs all-Opus / all-Sonnet, with per-model Ollama tokens and estimated savings.</p></div>
+      <div class="card"><h3><span class="ic">🔬</span>Real token accounting</h3><p>Beyond estimates: <code>get_real_token_usage</code> parses Claude Code transcripts for true per-tier tokens (incl. cache pricing) — main session and every sub-agent.</p></div>
+      <div class="card"><h3><span class="ic">🧮</span>170k context budget</h3><p>Planner &amp; Reviewer carry a 170k per-subtask context budget, verified post-run against real transcript counts and flagged if exceeded.</p></div>
+    </div>
+  </div>
+</section>
+
+<!-- FLAGS -->
+<section>
+  <div class="wrap">
+    <h2>Flags</h2>
+    <p class="sub">Drop any of these anywhere in the task text.</p>
+    <table>
+      <tr><th>Flag</th><th>Effect</th></tr>
+      <tr><td><code>[auto]</code></td><td>Skip the high-risk plan confirmation halt (CI / unattended runs).</td></tr>
+      <tr><td><code>[model:&lt;name&gt;]</code></td><td>Pin a specific Ollama model; skips the auto-probe and scoring.</td></tr>
+      <tr><td><code>[ollama-only]</code></td><td>Ollama writes the code; Haiku writes it to the file verbatim (no adaptation).</td></tr>
+      <tr><td><code>[ollama-agent]</code></td><td>The Ollama model drives the whole step via its own tool-calling loop — no Haiku Worker. For tool-call-capable models; falls back to Haiku if it can't.</td></tr>
+      <tr><td><code>[fast-select]</code></td><td>Skip llm-checker scoring; just use the first installed model.</td></tr>
+    </table>
+  </div>
+</section>
+
+<!-- INSTALL + USAGE -->
+<section id="install">
+  <div class="wrap">
+    <h2>Install &amp; use</h2>
+    <p class="sub">Requires Claude Code, Python 3.10+, and (optionally) Ollama for local offload.</p>
+    <div class="cols2">
+      <div>
+        <h3 style="margin-bottom:8px;font-size:15px">Install</h3>
+        <pre class="block"><span class="c">git clone</span> https://github.com/Adam-Luciano-MDB/\
+multi-model-flow.git
+<span class="c">cd</span> multi-model-flow
+./scripts/setup_mcp.sh <span class="y">--global</span>
+<span class="p"># registers the plugin as a marketplace,</span>
+<span class="p"># installs it, wires the Ollama MCP server.</span>
+<span class="p"># then restart Claude Code</span></pre>
+      </div>
+      <div>
+        <h3 style="margin-bottom:8px;font-size:15px">Use from any project</h3>
+        <pre class="block"><span class="y">/mmf</span> Build a CSV parser with unit tests.
+
+<span class="y">/mmf</span> <span class="c">[auto]</span> Add rate limiting to /api/v2.
+
+<span class="y">/mmf</span> <span class="c">[ollama-agent] [model:qwen2.5-coder:7b]</span>
+   Add a /health endpoint with a test.</pre>
+        <p class="note">After a run, the cost dashboard opens at
+          <code>http://localhost:8765</code>, or ask Claude:
+          <em>"Use the ollama-local get_real_token_usage tool."</em></p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- TOOLS -->
+<section>
+  <div class="wrap">
+    <h2>Bundled MCP tools</h2>
+    <p class="sub">The <code>ollama-local</code> server ships with the plugin — these are callable
+      from the skill or directly from Claude.</p>
+    <ul class="tools">
+      <li><code>list_local_models</code> — installed Ollama models</li>
+      <li><code>list_models_for_selection</code> — numbered pick list</li>
+      <li><code>recommend_model</code> — RAM-based recommender</li>
+      <li><code>get_model_context_length</code> — model's max window</li>
+      <li><code>estimate_context_fit</code> — does a step fit the window?</li>
+      <li><code>ask_local_model</code> — raw local generation</li>
+      <li><code>ask_local_model_for_code</code> — code-optimised generation</li>
+      <li><code>run_ollama_coding_agent</code> — local tool-calling loop</li>
+      <li><code>check_token_budget</code> — 170k budget audit</li>
+      <li><code>get_real_token_usage</code> — real per-tier tokens &amp; cost</li>
+      <li><code>get_metrics_summary</code> — CLI metrics summary</li>
+      <li><code>open_metrics_dashboard</code> — launch the web dashboard</li>
+      <li><code>log_event</code> — append a metrics record</li>
+    </ul>
+  </div>
+</section>
+
+<footer>
+  <div class="wrap">
+    <strong>Multi-Model-Flow</strong> · MIT licensed · built for Claude Code<br>
+    <a href="https://github.com/Adam-Luciano-MDB/multi-model-flow">github.com/Adam-Luciano-MDB/multi-model-flow</a>
+    &nbsp;·&nbsp; <code>/mmf</code> after install
+    <p class="note" style="color:#9fb9bd">This page is a static reference generated from the plugin's
+      v0.1.0 feature set. See the repo README for full docs.</p>
+  </div>
+</footer>
+
+</body>
+</html>

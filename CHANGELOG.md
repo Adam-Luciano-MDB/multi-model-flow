@@ -27,5 +27,6 @@ project aims to follow [Semantic Versioning](https://semver.org/).
   `get_real_token_usage` (actual per-tier tokens parsed from session transcripts).
 - 170k per-subtask context budget on Planner/Reviewer, verified post-run via
   `check_token_budget`.
+- `mmf-plugin.htm` — a single-page visual reference for the plugin.
 
 [Unreleased]: https://github.com/Adam-Luciano-MDB/multi-model-flow
