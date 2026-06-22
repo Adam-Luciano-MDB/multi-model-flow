@@ -14,7 +14,7 @@ Parse the arguments:
 - **auto** — skip high-risk confirmation if `[auto]` appears anywhere in the text
 - **pinnedModel** — the model name inside `[model:X]` if present (e.g. `[model:devstral:latest]`)
 - **ollamaOnly** — set if `[ollama-only]` appears; bypasses the Haiku Worker and writes Ollama output directly to the target file
-- **fastSelect** — set if `[fast-select]` appears; skips llm-checker scoring at probe time and uses the quick devstral→qwen2.5-coder→first heuristic instead
+- **fastSelect** — set if `[fast-select]` appears; skips llm-checker scoring at probe time and just uses the first installed model
 
 Make a numbered todo list covering all four phases before you start, then tick off each item as you complete it.
 
@@ -47,7 +47,7 @@ Make a numbered todo list covering all four phases before you start, then tick o
           llama3.1:8b        score 40  (installed)
         ```
      - **Note:** the "stop Ollama before running llm-checker" caveat does **not** apply here — this ranks models you've *already* pulled by coding quality, it does not estimate what your hardware can newly run.
-   - **Fallback heuristic** — use this when `[fast-select]` is set, when `llm-checker` is unavailable or errors, or when no recommended model overlaps INSTALLED: select with this priority from INSTALLED — devstral (any variant) → qwen2.5-coder (any variant) → first model in the list → null.
+   - **Fallback** — use this when `[fast-select]` is set, when `llm-checker` is unavailable or errors, or when no recommended model overlaps INSTALLED: select the **first model in INSTALLED** (or null if empty). No model names are hardcoded.
 
 5. Log the outcome:
    - Ollama available: update the banner — `worker: haiku + OLLAMA_MODEL`

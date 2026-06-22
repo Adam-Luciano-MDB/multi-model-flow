@@ -310,7 +310,7 @@ All supported flags (placed anywhere in the argument text):
 | `[auto]`         | off     | Skip the high-risk plan confirmation halt            |
 | `[model:<name>]` | —       | Pin a specific Ollama model; skips the auto-probe and scoring |
 | `[ollama-only]`  | off     | Write Ollama output directly to file; bypasses the Haiku Worker's adaptation step. Falls back to Haiku if Ollama is offline. |
-| `[fast-select]`  | off     | Skip llm-checker scoring at probe time; use the quick devstral→qwen2.5-coder→first heuristic instead |
+| `[fast-select]`  | off     | Skip llm-checker scoring at probe time; just use the first installed model |
 
 In auto mode a high-risk plan is logged and executed instead of halting. Use it
 deliberately — the confirmation step exists to catch destructive plans before
@@ -373,9 +373,9 @@ passing the arg each time, set it via an environment variable:
 > skill **auto-selects the best installed coding model**: it asks `llm-checker`
 > to rank models for `category: coding` and picks the highest-scored model you
 > already have pulled, logging the candidates it considered. If `llm-checker`
-> isn't available (or you pass `[fast-select]`), it falls back to a quick
-> heuristic — **devstral** → **qwen2.5-coder** → **first model** returned. To
-> force a specific model for a run, pass `[model:<name>]` (see above).
+> isn't available (or you pass `[fast-select]`), it falls back to the **first
+> installed model** `list_local_models` returns — no model names are hardcoded.
+> To force a specific model for a run, pass `[model:<name>]` (see above).
 >
 > This scoring ranks models you've *already* installed by coding quality, so the
 > "stop Ollama before running llm-checker" caveat does **not** apply to it.
@@ -733,8 +733,8 @@ silently falls back to Haiku-only generation. No manual intervention required.
 ### Ollama is detected but code generation looks wrong
 
 The probe auto-selects the highest-scored installed coding model via
-`llm-checker` (falling back to devstral → qwen2.5-coder → first when llm-checker
-is unavailable or `[fast-select]` is passed). The skill logs which candidates it
+`llm-checker` (falling back to the first installed model when llm-checker is
+unavailable or `[fast-select]` is passed). The skill logs which candidates it
 considered and why. If the selected model is still not suited for coding, pin a
 better one for the run:
 
