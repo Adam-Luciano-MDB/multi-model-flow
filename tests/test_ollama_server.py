@@ -138,14 +138,57 @@ class TestAskLocalModel:
         payload = mock_post.call_args.kwargs["json"]
         assert payload["system"] == "Be concise."
 
-    def test_uses_default_model_when_model_arg_is_empty(self):
+    def test_uses_first_installed_model_when_model_arg_is_empty(self):
         mock_resp = MagicMock()
         mock_resp.json.return_value = {"response": "ok"}
-        with patch("httpx.post", return_value=mock_resp) as mock_post:
-            with patch.object(_metrics_mod, "append"):
-                server.ask_local_model("", "prompt")
+        with patch("httpx.get", return_value=MagicMock(json=lambda: {
+            "models": [{"name": "first:model"}, {"name": "second:model"}]
+        })):
+            with patch("httpx.post", return_value=mock_resp) as mock_post:
+                with patch.object(_metrics_mod, "append"):
+                    server.ask_local_model("", "prompt")
         payload = mock_post.call_args.kwargs["json"]
-        assert payload["model"] == server.DEFAULT_MODEL
+        assert payload["model"] == "first:model"
+
+    def test_env_default_model_wins_over_first_installed(self):
+        mock_resp = MagicMock()
+        mock_resp.json.return_value = {"response": "ok"}
+        with patch.object(server, "DEFAULT_MODEL", "env:model"):
+            with patch("httpx.get", return_value=MagicMock(json=lambda: {"models": [{"name": "first:model"}]})):
+                with patch("httpx.post", return_value=mock_resp) as mock_post:
+                    with patch.object(_metrics_mod, "append"):
+                        server.ask_local_model("", "prompt")
+        payload = mock_post.call_args.kwargs["json"]
+        assert payload["model"] == "env:model"
+
+    def test_returns_error_when_no_model_and_none_installed(self):
+        with patch("httpx.get", side_effect=Exception("offline")):
+            with patch("httpx.post") as mock_post:
+                with patch.object(_metrics_mod, "append"):
+                    result = server.ask_local_model("", "prompt")
+        assert result.startswith("ERROR")
+        mock_post.assert_not_called()
+
+
+class TestListModelsForSelection:
+    def test_numbered_list_marks_first_as_default(self):
+        with patch("httpx.get", return_value=MagicMock(json=lambda: {
+            "models": [{"name": "alpha:7b"}, {"name": "beta:3b"}]
+        })):
+            out = server.list_models_for_selection()
+        assert "1. alpha:7b" in out
+        assert "default" in out.split("\n")[1]  # first entry marked default
+        assert "2. beta:3b" in out
+
+    def test_message_when_no_models(self):
+        with patch("httpx.get", return_value=MagicMock(json=lambda: {"models": []})):
+            out = server.list_models_for_selection()
+        assert "No local models" in out
+
+    def test_surfaces_offline_error(self):
+        with patch("httpx.get", side_effect=httpx.ConnectError("refused")):
+            out = server.list_models_for_selection()
+        assert "ERROR" in out
 
 
 class TestAskLocalModelForCode:
@@ -158,27 +201,26 @@ class TestAskLocalModelForCode:
                     result = server.ask_local_model_for_code("write a hello function", language="Python")
         assert result == "def hello(): pass"
 
-    def test_prefers_devstral_when_available(self):
+    def test_uses_first_installed_model_no_hardcoded_preference(self):
         mock_resp = MagicMock()
         mock_resp.json.return_value = {"response": "ok"}
+        # devstral present but NOT first — must pick the first installed, not devstral
         with patch("httpx.get", return_value=MagicMock(json=lambda: {
-            "models": [{"name": "qwen2.5-coder:7b"}, {"name": "devstral:latest"}]
+            "models": [{"name": "alpha:7b"}, {"name": "devstral:latest"}]
         })):
             with patch("httpx.post", return_value=mock_resp) as mock_post:
                 with patch.object(_metrics_mod, "append"):
                     server.ask_local_model_for_code("prompt")
         payload = mock_post.call_args.kwargs["json"]
-        assert payload["model"] == "devstral:latest"
+        assert payload["model"] == "alpha:7b"
 
-    def test_falls_back_to_default_model_when_no_models_available(self):
-        mock_resp = MagicMock()
-        mock_resp.json.return_value = {"response": "ok"}
+    def test_returns_error_when_no_models_available(self):
         with patch("httpx.get", side_effect=Exception("offline")):
-            with patch("httpx.post", return_value=mock_resp) as mock_post:
+            with patch("httpx.post") as mock_post:
                 with patch.object(_metrics_mod, "append"):
-                    server.ask_local_model_for_code("prompt")
-        payload = mock_post.call_args.kwargs["json"]
-        assert payload["model"] == server.DEFAULT_MODEL
+                    result = server.ask_local_model_for_code("prompt")
+        assert result.startswith("ERROR")
+        mock_post.assert_not_called()
 
     def test_prepends_context_to_prompt(self):
         mock_resp = MagicMock()

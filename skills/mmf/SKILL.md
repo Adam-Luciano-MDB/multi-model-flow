@@ -49,6 +49,10 @@ Make a numbered todo list covering all four phases before you start, then tick o
      - **Note:** the "stop Ollama before running llm-checker" caveat does **not** apply here — this ranks models you've *already* pulled by coding quality, it does not estimate what your hardware can newly run.
    - **Fallback** — use this when `[fast-select]` is set, when `llm-checker` is unavailable or errors, or when no recommended model overlaps INSTALLED: select the **first model in INSTALLED** (or null if empty). No model names are hardcoded.
 
+4b. **Runtime selection** — let the user choose, with the computed pick as the default:
+   - **If auto mode is on, a pinnedModel was passed, OLLAMA_MODEL is null, or INSTALLED has only one model**: skip the prompt and use OLLAMA_MODEL as-is.
+   - **Otherwise**: present the installed models as a numbered selection list (using the `ollama-local list_models_for_selection` tool, or the candidate log above) with the auto-selected model marked as the recommended default, and ask the user which to use via AskUserQuestion. Offer the recommended model as the first option. If the user picks a different one, set OLLAMA_MODEL to it; if they accept the default or don't answer, keep the computed pick.
+
 5. Log the outcome:
    - Ollama available: update the banner — `worker: haiku + OLLAMA_MODEL`
    - Ollama offline: `Ollama not available — Worker will use Haiku for all generation`

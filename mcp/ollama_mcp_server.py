@@ -18,9 +18,10 @@ import metrics as _metrics
 import token_usage as _token_usage
 
 OLLAMA_BASE = os.environ.get("OLLAMA_BASE_URL", "http://localhost:11434")
-# Developer-overridable default model. Set OLLAMA_DEFAULT_MODEL in your shell or
-# in the MCP server registration to pick the model that suits your hardware.
-DEFAULT_MODEL = os.environ.get("OLLAMA_DEFAULT_MODEL", "qwen2.5-coder:32b")
+# Optional explicit default model. When unset (the default), tools that need a
+# model fall back to the first locally-installed model — no model name is
+# hardcoded. Set OLLAMA_DEFAULT_MODEL in your shell only if you want to pin one.
+DEFAULT_MODEL = os.environ.get("OLLAMA_DEFAULT_MODEL", "")
 TIMEOUT = int(os.environ.get("OLLAMA_TIMEOUT", "1500"))  # seconds — default 25 minutes
 
 # Rough RAM-to-model guidance for coding models. Each entry: (min_gb, model, note).
@@ -55,6 +56,39 @@ def list_local_models() -> list[str]:
         return ["ERROR: Ollama is not running. Start it with `ollama serve`."]
     except Exception as e:
         return [f"ERROR: {e}"]
+
+
+def _first_installed_model() -> str:
+    """First locally-installed model name, or "" if none/offline. No hardcoded names."""
+    for m in list_local_models():
+        if "ERROR" not in m and m.strip().lower() != "none":
+            return m
+    return ""
+
+
+def _resolve_model(model: str) -> str:
+    """Resolve a possibly-empty model arg: explicit > OLLAMA_DEFAULT_MODEL > first installed."""
+    return model or DEFAULT_MODEL or _first_installed_model()
+
+
+@mcp.tool()
+def list_models_for_selection() -> str:
+    """
+    Return the locally-installed Ollama models as a numbered selection list, so a
+    user can pick one to run. The first entry is the default used when no model
+    is specified. Returns a guidance message if Ollama is offline or empty.
+    """
+    models = [m for m in list_local_models() if "ERROR" not in m and m.strip().lower() != "none"]
+    if not models:
+        errs = [m for m in list_local_models() if "ERROR" in m]
+        if errs:
+            return errs[0]
+        return "No local models installed. Pull one with `ollama pull <model>`."
+    lines = ["Installed Ollama models (pick one):"]
+    for i, m in enumerate(models, 1):
+        suffix = "  ← default (first installed)" if i == 1 else ""
+        lines.append(f"  {i}. {m}{suffix}")
+    return "\n".join(lines)
 
 
 @mcp.tool()
@@ -118,8 +152,9 @@ def ask_local_model(model: str, prompt: str, system: str = "") -> str:
         prompt: The user prompt.
         system: Optional system prompt.
     """
+    model = _resolve_model(model)
     if not model:
-        model = DEFAULT_MODEL
+        return "ERROR: no model specified and no local models installed. Pull one with `ollama pull <model>`."
     payload: dict = {
         "model": model,
         "prompt": prompt,
@@ -170,23 +205,18 @@ def ask_local_model_for_code(
     """
     Convenience wrapper for code generation via the local Ollama model.
 
-    Automatically selects the best available model (devstral if installed,
-    otherwise DEFAULT_MODEL). Pass `model` to override the selection.
+    When `model` is empty, uses OLLAMA_DEFAULT_MODEL if set, otherwise the first
+    locally-installed model. No model name is hardcoded. Pass `model` to override.
 
     Args:
         prompt: What to implement or fix.
         context: Existing file content or surrounding code to consider.
         language: Target programming language (optional but recommended).
-        model: Override model name. When empty, auto-selects from installed models.
+        model: Override model name. When empty, resolves to the first installed model.
     """
+    model = _resolve_model(model)
     if not model:
-        available = list_local_models()
-        model = DEFAULT_MODEL
-        if not any("ERROR" in m for m in available):
-            for m in available:
-                if "devstral" in m.lower():
-                    model = m
-                    break
+        return "ERROR: no local models installed. Pull one with `ollama pull <model>`."
 
     lang_hint = f" in {language}" if language else ""
     system = (

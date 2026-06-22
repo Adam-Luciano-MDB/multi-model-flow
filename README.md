@@ -345,8 +345,9 @@ to use** above.
 **Available MCP tools** (also callable directly from Claude):
 - `recommend_model` — RAM-based fallback recommender (no Node.js required)
 - `list_local_models` — see what models are pulled locally
-- `ask_local_model(model, prompt, system)` — raw generation
-- `ask_local_model_for_code(prompt, context, language, model)` — code-optimised wrapper (auto-selects a model when `model` is omitted)
+- `list_models_for_selection` — installed models as a numbered selection list (first = default); used for the runtime model pick
+- `ask_local_model(model, prompt, system)` — raw generation; when `model` is omitted, uses `OLLAMA_DEFAULT_MODEL` if set, else the first installed model
+- `ask_local_model_for_code(prompt, context, language, model)` — code-optimised wrapper; when `model` is omitted, resolves to the first installed model (no hardcoded preference)
 - `log_event` — append a metrics record to `metrics.jsonl`
 - `get_metrics_summary` — print the CLI metrics summary
 - `get_real_token_usage` — parse Claude Code session transcripts and report **real** per-tier token counts and cost (not estimates); includes prompt-cache pricing
@@ -364,7 +365,7 @@ passing the arg each time, set it via an environment variable:
 
 | Variable               | Default                  | Purpose                                                        |
 |------------------------|--------------------------|----------------------------------------------------------------|
-| `OLLAMA_DEFAULT_MODEL` | `qwen2.5-coder:32b`      | Server-side fallback used by `ask_local_model` when no model arg is passed |
+| `OLLAMA_DEFAULT_MODEL` | _(unset → first installed model)_ | Optional pin for `ask_local_model`/`ask_local_model_for_code` when no model arg is passed. Unset by default — no model name is hardcoded; the first installed model is used. |
 | `OLLAMA_BASE_URL`      | `http://localhost:11434`  | Ollama endpoint                                               |
 | `OLLAMA_TIMEOUT`       | `1500`                   | Generation timeout in seconds (default 25 min)                |
 
@@ -379,6 +380,12 @@ passing the arg each time, set it via an environment variable:
 >
 > This scoring ranks models you've *already* installed by coding quality, so the
 > "stop Ollama before running llm-checker" caveat does **not** apply to it.
+>
+> **Runtime selection:** outside auto mode (and when more than one model is
+> installed and you didn't pin one), the skill shows the installed models as a
+> numbered list with the auto-selected model marked as the recommended default,
+> and lets you pick a different one before the run starts. Auto mode uses the
+> computed pick without prompting.
 
 For a hardware-aware recommendation across 229+ models, use the `llm-checker`
 MCP server (see **Model selection with llm-checker** below).
