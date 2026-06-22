@@ -1,9 +1,13 @@
 {
   "name": "multi-model-flow",
+  "version": "0.1.0",
   "description": "Cost-optimised coding skill: a Planner → Worker → Reviewer pipeline where Opus plans, Haiku implements (with local Ollama when available), and Sonnet reviews. Bundles the ollama-local MCP server.",
   "author": {
     "name": "Adam Luciano",
     "email": "adam.luciano@mariadb.com"
   },
-  "homepage": "https://github.com/Adam-Luciano-MDB/multi-model-flow"
+  "homepage": "https://github.com/Adam-Luciano-MDB/multi-model-flow",
+  "license": "MIT",
+  "category": "workflow",
+  "keywords": ["cost-optimisation", "ollama", "planner-worker-reviewer", "local-models", "code-review"]
 }

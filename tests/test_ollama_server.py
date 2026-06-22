@@ -4,6 +4,7 @@ All tests mock httpx and the metrics module so they run fully offline with no
 Ollama model required.
 """
 import json
+import os
 from unittest.mock import MagicMock, patch
 
 import httpx
@@ -181,12 +182,55 @@ def _chat(message):
 class TestSafeJoin:
     def test_allows_paths_inside_root(self, tmp_path):
         root = str(tmp_path)
-        assert server._safe_join(root, "sub/file.py").startswith(root)
+        # compare against realpath — _safe_join resolves symlinks (e.g. macOS /var -> /private/var)
+        assert server._safe_join(root, "sub/file.py").startswith(os.path.realpath(root))
 
     def test_rejects_traversal(self, tmp_path):
-        import pytest
         with pytest.raises(ValueError):
             server._safe_join(str(tmp_path), "../../etc/passwd")
+
+    def test_rejects_symlink_escape(self, tmp_path):
+        # A symlinked directory inside the sandbox must not redirect writes outside it.
+        root = tmp_path / "proj"
+        root.mkdir()
+        outside = tmp_path / "outside"
+        outside.mkdir()
+        (root / "link").symlink_to(outside)  # proj/link -> ../outside
+        with pytest.raises(ValueError):
+            server._safe_join(str(root), "link/escaped.py")
+
+
+class TestExecAgentTool:
+    def test_read_file(self, tmp_path):
+        (tmp_path / "a.txt").write_text("hello")
+        assert server._exec_agent_tool("read_file", {"path": "a.txt"}, str(tmp_path)) == "hello"
+
+    def test_write_file_creates_parents(self, tmp_path):
+        out = server._exec_agent_tool("write_file", {"path": "sub/b.py", "content": "x=1"}, str(tmp_path))
+        assert out.startswith("wrote ")
+        assert (tmp_path / "sub" / "b.py").read_text() == "x=1"
+
+    def test_list_files(self, tmp_path):
+        (tmp_path / "a.txt").write_text("")
+        assert "a.txt" in server._exec_agent_tool("list_files", {"path": "."}, str(tmp_path))
+
+    def test_unknown_tool(self, tmp_path):
+        assert server._exec_agent_tool("nope", {}, str(tmp_path)).startswith("ERROR: unknown tool")
+
+    def test_json_string_arguments_parsed(self, tmp_path):
+        # Real Ollama returns function.arguments as a JSON string.
+        out = server._exec_agent_tool("write_file", '{"path": "c.py", "content": "y=2"}', str(tmp_path))
+        assert out.startswith("wrote ")
+        assert (tmp_path / "c.py").read_text() == "y=2"
+
+    def test_malformed_json_arguments(self, tmp_path):
+        assert server._exec_agent_tool("read_file", "{not json", str(tmp_path)).startswith("ERROR")
+
+    def test_missing_file_is_error_not_crash(self, tmp_path):
+        assert server._exec_agent_tool("read_file", {"path": "nope.txt"}, str(tmp_path)).startswith("ERROR")
+
+    def test_non_dict_arguments(self, tmp_path):
+        assert server._exec_agent_tool("read_file", 42, str(tmp_path)).startswith("ERROR")
 
 
 class TestRunOllamaCodingAgent:
@@ -247,6 +291,40 @@ class TestRunOllamaCodingAgent:
         data = json.loads(out)
         assert data["status"] == "no_tool_calls"
         assert data["files_written"] == []
+
+    def test_max_iterations_cap(self, tmp_path):
+        # Model that keeps calling a tool forever must stop at the cap.
+        def always_tool():
+            return _chat({"role": "assistant", "tool_calls": [
+                {"function": {"name": "list_files", "arguments": {"path": "."}}}]})
+        with patch("httpx.get", return_value=MagicMock(json=lambda: {"models": [{"name": "m:1b"}]})):
+            with patch("httpx.post", side_effect=[always_tool() for _ in range(5)]):
+                with patch.object(_metrics_mod, "append"):
+                    out = server.run_ollama_coding_agent("loop", model="m:1b",
+                                                          work_dir=str(tmp_path), max_iterations=3)
+        assert json.loads(out)["status"] == "max_iterations"
+
+    def test_timeout_logs_error_outcome(self, tmp_path):
+        captured = []
+        with patch("httpx.get", return_value=MagicMock(json=lambda: {"models": [{"name": "m:1b"}]})):
+            with patch("httpx.post", side_effect=httpx.TimeoutException("slow")):
+                with patch.object(_metrics_mod, "append", side_effect=lambda r: captured.append(r)):
+                    out = server.run_ollama_coding_agent("x", model="m:1b", work_dir=str(tmp_path))
+        assert out.startswith("ERROR")
+        assert captured[-1]["outcome"] == "error"
+
+    def test_json_string_tool_args_through_loop(self, tmp_path):
+        responses = [
+            _chat({"role": "assistant", "tool_calls": [
+                {"function": {"name": "write_file", "arguments": '{"path":"z.py","content":"q=9\\n"}'}}]}),
+            _chat({"role": "assistant", "content": "done"}),
+        ]
+        with patch("httpx.get", return_value=MagicMock(json=lambda: {"models": [{"name": "m:1b"}]})):
+            with patch("httpx.post", side_effect=responses):
+                with patch.object(_metrics_mod, "append"):
+                    out = server.run_ollama_coding_agent("write z", model="m:1b", work_dir=str(tmp_path))
+        assert "z.py" in json.loads(out)["files_written"]
+        assert (tmp_path / "z.py").read_text() == "q=9\n"
 
     def test_http_error_signals_tool_support(self, tmp_path):
         err = httpx.HTTPStatusError("bad", request=MagicMock(), response=MagicMock(status_code=400))
@@ -317,6 +395,31 @@ class TestModelContextLength:
             with patch("httpx.post", return_value=self._show(8192)):
                 out = server.get_model_context_length("m:1b")
         assert "8,192" in out
+
+    def test_tool_not_reported_branch(self):
+        m = MagicMock(); m.raise_for_status.return_value = None
+        m.json.return_value = {"model_info": {}}
+        with patch("httpx.get", return_value=MagicMock(json=lambda: {"models": [{"name": "m:1b"}]})):
+            with patch("httpx.post", return_value=m):
+                out = server.get_model_context_length("m:1b")
+        assert "not reported" in out
+
+    def test_tool_no_models(self):
+        with patch("httpx.get", side_effect=Exception("offline")):
+            out = server.get_model_context_length("")
+        assert out.startswith("ERROR")
+
+
+class TestTokenToolWrappers:
+    def test_get_real_token_usage_delegates(self):
+        with patch.object(server._token_usage, "summarize_real_usage", return_value="SENTINEL") as fn:
+            assert server.get_real_token_usage() == "SENTINEL"
+        fn.assert_called_once()
+
+    def test_check_token_budget_forwards_limit(self):
+        with patch.object(server._token_usage, "summarize_token_budget", return_value="OK") as fn:
+            assert server.check_token_budget(50000) == "OK"
+        fn.assert_called_once_with(50000)
 
 
 class TestEstimateContextFit:

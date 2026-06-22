@@ -351,9 +351,21 @@ _AGENT_TOOLS = [
 
 
 def _safe_join(root: str, path: str) -> str:
-    """Resolve `path` under `root`, rejecting traversal outside it."""
-    resolved = os.path.normpath(os.path.join(root, path))
-    if resolved != root and not resolved.startswith(root + os.sep):
+    """
+    Resolve `path` under `root`, rejecting traversal outside it.
+
+    Uses realpath so symlinks can't escape the sandbox: both the root and the
+    target's existing parent are symlink-resolved before the containment check.
+    A lexical normpath alone would let the model create a symlink inside the
+    sandbox and then write through it to an outside path.
+    """
+    real_root = os.path.realpath(root)
+    candidate = os.path.join(real_root, path)
+    # Resolve symlinks on the deepest existing prefix (the file itself may not
+    # exist yet), so a symlinked parent directory can't redirect the write.
+    parent = os.path.dirname(candidate)
+    resolved = os.path.join(os.path.realpath(parent), os.path.basename(candidate))
+    if resolved != real_root and not resolved.startswith(real_root + os.sep):
         raise ValueError(f"path '{path}' escapes the work directory")
     return resolved
 

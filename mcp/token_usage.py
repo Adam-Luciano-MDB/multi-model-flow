@@ -190,7 +190,14 @@ def peak_context_by_subagent(project_dir=None) -> list:
     if not (project_dir and os.path.isdir(project_dir)):
         return rows
     sub_glob = os.path.join(project_dir, "**", "subagents", "agent-*.jsonl")
-    for path in sorted(glob.glob(sub_glob, recursive=True), key=lambda p: -os.path.getmtime(p)):
+
+    def _safe_mtime(p):
+        try:
+            return os.path.getmtime(p)
+        except OSError:
+            return 0.0
+
+    for path in sorted(glob.glob(sub_glob, recursive=True), key=lambda p: -_safe_mtime(p)):
         peak = 0
         model = ""
         for tier_unused, usage in _iter_assistant_usage(path):

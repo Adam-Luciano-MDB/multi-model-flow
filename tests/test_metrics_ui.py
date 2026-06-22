@@ -29,6 +29,15 @@ class TestRenderMetricsJson:
         assert "workflow" in data
         assert "ollama" in data
 
+    def test_render_survives_transcript_parse_error(self):
+        # render_metrics_json must never crash if transcript parsing raises.
+        import token_usage
+        with patch.object(token_usage, "aggregate_real_usage", side_effect=RuntimeError("boom")):
+            out = metrics_ui.render_metrics_json()
+        data = json.loads(out)
+        assert data["real_tokens"]["by_tier"] == []
+        assert data["real_tokens"]["total_tokens"] == 0
+
     def test_json_contains_claude_key(self, tmp_path):
         f = str(tmp_path / "m.jsonl")
         with open(f, "w") as fh:

@@ -352,6 +352,30 @@ ollama pull qwen2.5-coder:7b   # or use llm-checker to find the best model for y
 # 5. Edit CLAUDE.md — fill in Project, Tech stack, and Project structure
 ```
 
+**Two setup modes:**
+- `./scripts/setup_mcp.sh --global` (recommended) — installs deps, then registers
+  this repo as a Claude Code marketplace and installs the plugin from it, so `/mmf`
+  works in every project.
+- `./scripts/setup_mcp.sh` (no flag) — installs deps and registers the
+  `ollama-local` MCP server for **standalone/project use only** (no plugin
+  install). Use this if you want the MCP tools without the global `/mmf` skill.
+
+### Uninstall
+
+```bash
+# Remove the plugin and its marketplace
+claude plugin uninstall multi-model-flow@multi-model-flow
+claude plugin marketplace remove multi-model-flow
+
+# Stop the metrics dashboard if it's running
+lsof -ti tcp:8765 | xargs kill 2>/dev/null
+
+# (Optional) remove the global llm-checker npm package
+npm uninstall -g llm-checker
+```
+
+Restart Claude Code afterward.
+
 ---
 
 ## Usage
@@ -887,14 +911,20 @@ reserves Opus for genuinely bad plans.
 
 ## Customising CLAUDE.md
 
-Open [`CLAUDE.md`](CLAUDE.md) and replace every `<placeholder>` section:
+`CLAUDE.md` is auto-loaded into every Claude Code session and the Planner/Worker
+read it for context — more signal means fewer planning mistakes and less style
+drift. The [`CLAUDE.md`](CLAUDE.md) in this repo describes multi-model-flow
+itself (project summary, cost model, code standards).
 
-1. **Project** — one sentence about what this codebase does
+When you run `/mmf` **inside your own project**, it's *your* project's `CLAUDE.md`
+that matters (a plugin doesn't override the host project's file). Add to it:
+
+1. **Project** — one sentence about what your codebase does
 2. **Tech stack** — languages, frameworks, key libraries
-3. **Project structure** — a short directory map (see the comment template)
+3. **Project structure** — a short directory map
 
-CLAUDE.md is auto-loaded into every Claude Code session. Good context here
-reduces planner mistakes and worker style drift.
+The comment at the bottom of this repo's `CLAUDE.md` is a starting template you
+can copy into your own.
 
 ---
 

@@ -116,6 +116,20 @@ class TestTokenBudget:
         assert result["ok"] is False
         assert result["over_budget"][0]["agent_type"] == "planner"
 
+    def test_peak_includes_cache_read_tokens(self, tmp_path):
+        # peak context must sum input + cache_read + cache_creation, not input alone.
+        proj = tmp_path / "proj"
+        sub = proj / "sess" / "subagents"
+        sub.mkdir(parents=True)
+        with open(sub / "agent-x.jsonl", "w") as fh:
+            fh.write(json.dumps({"type": "assistant", "message": {"model": "claude-opus-4-8",
+                "usage": {"input_tokens": 1000, "cache_read_input_tokens": 160000,
+                          "cache_creation_input_tokens": 0, "output_tokens": 50}}}) + "\n")
+        with open(sub / "agent-x.meta.json", "w") as fh:
+            json.dump({"agentType": "planner"}, fh)
+        rows = token_usage.peak_context_by_subagent(str(proj))
+        assert rows[0]["peak_context_tokens"] == 161000
+
     def test_check_ok_when_under(self, tmp_path):
         proj = self._make_subagent(tmp_path, "reviewer", 80000)
         result = token_usage.check_token_budget(170000, proj)

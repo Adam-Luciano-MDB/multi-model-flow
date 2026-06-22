@@ -15,10 +15,24 @@ done
 echo "=== Multi-Model-Flow: MCP Setup ==="
 echo ""
 
-# 1. Install Python dependencies
+# 1. Install Python dependencies.
+#    fastmcp needs Python >= 3.10, so find such an interpreter up front and use
+#    it for pip — installing into a 3.9 (e.g. system python3) is the #1 first-run
+#    failure ("Connection closed", because launch.sh then can't find the deps).
 echo "[1/3] Installing Ollama MCP server dependencies..."
-python3.11 -m pip install -r "$PROJECT_ROOT/mcp/requirements.txt" 2>/dev/null \
-  || pip3 install -r "$PROJECT_ROOT/mcp/requirements.txt"
+PYBIN=""
+for py in python3.13 python3.12 python3.11 python3.10 python3; do
+  if command -v "$py" >/dev/null 2>&1 && "$py" -c 'import sys; sys.exit(0 if sys.version_info >= (3,10) else 1)' 2>/dev/null; then
+    PYBIN="$py"; break
+  fi
+done
+if [ -z "$PYBIN" ]; then
+  echo "      ERROR: no Python >= 3.10 found on PATH. fastmcp requires 3.10+."
+  echo "      Install Python 3.10+ and re-run this script."
+  exit 1
+fi
+echo "      Using $PYBIN ($($PYBIN --version 2>&1))"
+"$PYBIN" -m pip install -r "$PROJECT_ROOT/mcp/requirements.txt"
 echo "      Done."
 echo ""
 
@@ -99,8 +113,8 @@ echo ""
 echo "  [ ] 6. Edit CLAUDE.md with your project description, tech stack,"
 echo "         and directory structure."
 echo ""
-echo "Run the test suite (Python 3.11+ required):"
-echo "  python3.11 -m pytest tests/ -v"
+echo "Run the test suite (Python 3.10+ required):"
+echo "  $PYBIN -m pytest tests/ -v"
 echo ""
 echo "Test the MCP connections by asking Claude:"
 echo '  "Use the llm-checker hw_detect tool to inspect my hardware."'

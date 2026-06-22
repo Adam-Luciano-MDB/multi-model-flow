@@ -92,7 +92,7 @@ def summarize() -> str:
         lines.append("")
         lines.append("Recent runs (newest first):")
         for r in reversed(workflow_records[-10:]):
-            ts = datetime.fromtimestamp(r["ts"], tz=timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
+            ts = datetime.fromtimestamp(r.get("ts", 0), tz=timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
             meta = r.get("meta", {})
             outcome = r.get("outcome", "?")
             lines.append(

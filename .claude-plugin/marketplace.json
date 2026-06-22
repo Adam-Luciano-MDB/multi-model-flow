@@ -13,6 +13,7 @@
       "description": "Planner -> Worker -> Reviewer pipeline where Opus plans, Haiku implements (with local Ollama when available), and Sonnet reviews. Provides the /mmf skill, three sub-agents, and the bundled ollama-local MCP server.",
       "version": "0.1.0",
       "author": { "name": "Adam Luciano", "email": "adam.luciano@mariadb.com" },
+      "license": "MIT",
       "category": "workflow",
       "tags": ["cost-optimisation", "ollama", "planner-worker-reviewer", "local-models"],
       "source": "./"

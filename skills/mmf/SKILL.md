@@ -2,7 +2,7 @@
 name: mmf
 description: Planner → Worker → Reviewer pipeline for cost-optimised coding. Opus plans, Haiku implements (+ local Ollama if available), Sonnet reviews.
 argument-hint: <task description> [auto] [model:<ollama-model>] [ollama-only] [ollama-agent] [fast-select]
-allowed-tools: [Agent, TodoWrite, mcp__plugin_multi-model-flow_ollama-local__open_metrics_dashboard]
+allowed-tools: [Agent, TodoWrite, AskUserQuestion, mcp__plugin_multi-model-flow_ollama-local__open_metrics_dashboard]
 ---
 
 Run the **multi-model-flow** three-phase pipeline for this task:
