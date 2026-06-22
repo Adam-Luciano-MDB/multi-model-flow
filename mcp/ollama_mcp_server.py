@@ -344,6 +344,10 @@ def run_ollama_coding_agent(
     files_written: list[str] = []
     status = "max_iterations"
     final_message = ""
+    # Approximate token usage so the run shows up in the dashboard's Ollama
+    # section (chars ÷ 4). Count unique new content, not resent history.
+    prompt_chars = len(system) + len(user)
+    response_chars = 0
     t0 = time.time()
 
     try:
@@ -357,6 +361,7 @@ def run_ollama_coding_agent(
             msg = response.json().get("message", {}) or {}
             messages.append(msg)
             tool_calls = msg.get("tool_calls") or []
+            response_chars += len(msg.get("content") or "") + len(json.dumps(tool_calls))
             if not tool_calls:
                 final_message = (msg.get("content") or "").strip()
                 status = "complete" if files_written else "no_tool_calls"
@@ -369,6 +374,7 @@ def run_ollama_coding_agent(
                     rel = result[len("wrote "):]
                     if rel not in files_written:
                         files_written.append(rel)
+                prompt_chars += len(result)
                 messages.append({"role": "tool", "content": result})
     except httpx.ConnectError:
         status = "error"
@@ -384,11 +390,21 @@ def run_ollama_coding_agent(
         status = "error"
         return f"ERROR: {e}"
     finally:
+        # Log as an "ollama_call" so the dashboard's Ollama section (calls,
+        # latency, token columns) includes agentic runs. Agent-specific detail
+        # (mode, files, status) rides along in meta.
         _append_metric({
-            "phase": "ollama_agent",
+            "phase": "ollama_call",
             "model": model,
-            "outcome": status,
-            "meta": {"files_written": len(files_written), "duration_ms": int((time.time() - t0) * 1000)},
+            "outcome": "error" if status == "error" else "success",
+            "meta": {
+                "prompt_chars": prompt_chars,
+                "response_chars": response_chars,
+                "duration_ms": int((time.time() - t0) * 1000),
+                "mode": "ollama-agent",
+                "agent_status": status,
+                "files_written": len(files_written),
+            },
         })
 
     return json.dumps({

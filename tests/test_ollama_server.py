@@ -208,6 +208,30 @@ class TestRunOllamaCodingAgent:
         assert "out.py" in data["files_written"]
         assert (tmp_path / "out.py").read_text() == "x = 1\n"
 
+    def test_logs_ollama_call_metric_with_tokens(self, tmp_path):
+        # Regression: agentic runs must log phase "ollama_call" with char counts
+        # so the dashboard's Ollama section (calls + token columns) includes them.
+        responses = [
+            _chat({"role": "assistant", "tool_calls": [
+                {"function": {"name": "write_file",
+                              "arguments": {"path": "out.py", "content": "x = 1\n"}}}
+            ]}),
+            _chat({"role": "assistant", "content": "Done."}),
+        ]
+        captured = []
+        with patch("httpx.get", return_value=MagicMock(json=lambda: {"models": [{"name": "m:1b"}]})):
+            with patch("httpx.post", side_effect=responses):
+                with patch.object(_metrics_mod, "append", side_effect=lambda r: captured.append(r)):
+                    server.run_ollama_coding_agent("write out.py", model="m:1b", work_dir=str(tmp_path))
+        rec = captured[-1]
+        assert rec["phase"] == "ollama_call"
+        assert rec["model"] == "m:1b"
+        assert rec["outcome"] == "success"
+        assert rec["meta"]["prompt_chars"] > 0
+        assert rec["meta"]["response_chars"] > 0
+        assert rec["meta"]["mode"] == "ollama-agent"
+        assert rec["meta"]["files_written"] == 1
+
     def test_no_tool_calls_reports_no_files(self, tmp_path):
         with patch("httpx.get", return_value=MagicMock(json=lambda: {"models": [{"name": "m:1b"}]})):
             with patch("httpx.post", side_effect=[_chat({"role": "assistant", "content": "I think..."})]):
