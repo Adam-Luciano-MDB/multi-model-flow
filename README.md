@@ -114,19 +114,23 @@ User task description
           offline ▼  │ model found
                      ▼
         ┌──────────────────────────────────────────────┐
-        │  per step — one of three modes:              │
+        │  per step:                                   │
         │                                              │
-        │  default:       ollama draft (haiku) →       │
-        │                 worker (haiku) adapts+writes │
-        │  [ollama-only]: ollama draft → haiku writes  │
-        │                 it verbatim                  │
-        │  [ollama-agent]: ollama runs its own tool-   │
-        │                 calling loop, writes files   │
-        │                 itself (→ worker on failure) │
+        │  estimate_context_fit → fits ollama window?  │
         │                                              │
-        │  if context > ollama window:                 │
-        │     haiku chunks → ollama gens each →        │
-        │     haiku stitches → SONNET checks step      │
+        │  YES → path by flag:                         │
+        │    default:      ollama draft (haiku) →      │
+        │                  worker (haiku) adapts+writes │
+        │    [ollama-only]: ollama draft → haiku writes │
+        │                  it verbatim                  │
+        │    [ollama-agent]: ollama tool-call loop      │
+        │                  writes files (→ worker on    │
+        │                  failure)                     │
+        │                                              │
+        │  NO (overflow) → chunk path:                 │
+        │    haiku chunks → ollama gens each →         │
+        │    haiku stitches → SONNET checks step       │
+        │    (→ worker fallback if check fails)        │
         └──────────────┬───────────────────────────────┘
                        │ files_written
                        ▼
