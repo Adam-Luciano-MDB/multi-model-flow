@@ -135,6 +135,7 @@ cd multi-model-flow &amp;&amp; ./scripts/setup_mcp.sh <span class="c">--global</
     <div class="grid">
       <div class="card"><h3><span class="ic">💸</span>Cost-optimised routing</h3><p>Opus only plans &amp; reviews high-risk diffs; Haiku and local Ollama do the bulk implementation. Tier aliases auto-track the latest models.</p></div>
       <div class="card"><h3><span class="ic">🖥️</span>Local Ollama offload</h3><p>Three Worker modes: <b>default</b> (Haiku adapts an Ollama draft), <code>[ollama-only]</code> (verbatim write), and <code>[ollama-agent]</code> (the local model drives the step via its own tool-calling loop).</p></div>
+      <div class="card"><h3><span class="ic">🌐</span>OpenRouter backend</h3><p>Prefer a hosted model over local? The <code>[openrouter]</code> flag routes Worker generation through OpenRouter (any model id) instead of Ollama — set <code>OPENROUTER_API_KEY</code> + <code>OPENROUTER_MODEL</code>. The two backends stay separate.</p></div>
       <div class="card"><h3><span class="ic">🎯</span>Smart model selection</h3><p>At probe time it scores your installed models for coding via llm-checker and picks the best one — no hardcoded model names. Pin one with <code>[model:…]</code>.</p></div>
       <div class="card"><h3><span class="ic">📐</span>Context-aware chunking</h3><p>Detects each Ollama model's context window. If a step won't fit, Haiku splits it → Ollama generates the pieces → Haiku stitches → Sonnet verifies the stitched step.</p></div>
       <div class="card"><h3><span class="ic">✅</span>Hard test gate</h3><p>The reviewer must run the test suite. If any test fails, the run is forced to <b>rejected</b> — enforced at the orchestration level, never approved with failing tests.</p></div>
@@ -154,7 +155,8 @@ cd multi-model-flow &amp;&amp; ./scripts/setup_mcp.sh <span class="c">--global</
     <table>
       <tr><th>Flag</th><th>Effect</th></tr>
       <tr><td><code>[auto]</code></td><td>Skip the high-risk plan confirmation halt (CI / unattended runs).</td></tr>
-      <tr><td><code>[model:&lt;name&gt;]</code></td><td>Pin a specific Ollama model; skips the auto-probe and scoring.</td></tr>
+      <tr><td><code>[model:&lt;name&gt;]</code></td><td>Pin the Worker-generation model (Ollama tag or OpenRouter id); skips the auto-probe and scoring.</td></tr>
+      <tr><td><code>[openrouter]</code></td><td>Use <b>OpenRouter</b> as the Worker-generation backend instead of Ollama (separate path). Needs <code>OPENROUTER_API_KEY</code> + <code>OPENROUTER_MODEL</code>; falls back to Haiku if unconfigured.</td></tr>
       <tr><td><code>[ollama-only]</code></td><td>Ollama writes the code; Haiku writes it to the file verbatim (no adaptation).</td></tr>
       <tr><td><code>[ollama-agent]</code></td><td>The Ollama model drives the whole step via its own tool-calling loop — no Haiku Worker. For tool-call-capable models; falls back to Haiku if it can't.</td></tr>
       <tr><td><code>[fast-select]</code></td><td>Skip llm-checker scoring; just use the first installed model.</td></tr>

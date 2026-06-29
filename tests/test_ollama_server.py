@@ -650,3 +650,78 @@ class TestOpenMetricsDashboard:
              patch("subprocess.Popen", side_effect=OSError("boom")):
             result = server.open_metrics_dashboard(8765)
         assert result.startswith("ERROR")
+
+
+def _orouter(content):
+    m = MagicMock(); m.raise_for_status.return_value = None
+    m.json.return_value = {"choices": [{"message": {"content": content}}]}
+    return m
+
+
+class TestAskOpenRouterForCode:
+    def test_success(self):
+        with patch.object(server, "OPENROUTER_API_KEY", "sk-or-key"), \
+             patch.object(server, "OPENROUTER_MODEL", "qwen/q"), \
+             patch("httpx.post", return_value=_orouter("def f(): pass")), \
+             patch.object(_metrics_mod, "append"):
+            out = server.ask_openrouter_for_code("write f", language="Python")
+        assert out == "def f(): pass"
+
+    def test_missing_api_key(self):
+        with patch.object(server, "OPENROUTER_API_KEY", ""):
+            out = server.ask_openrouter_for_code("x")
+        assert out.startswith("ERROR") and "OPENROUTER_API_KEY" in out
+
+    def test_missing_model(self):
+        with patch.object(server, "OPENROUTER_API_KEY", "sk"), \
+             patch.object(server, "OPENROUTER_MODEL", ""):
+            out = server.ask_openrouter_for_code("x")
+        assert out.startswith("ERROR") and "model" in out.lower()
+
+    def test_http_error(self):
+        err = httpx.HTTPStatusError("bad", request=MagicMock(), response=MagicMock(status_code=401))
+        resp = MagicMock(); resp.raise_for_status.side_effect = err
+        with patch.object(server, "OPENROUTER_API_KEY", "sk"), \
+             patch.object(server, "OPENROUTER_MODEL", "qwen/q"), \
+             patch("httpx.post", return_value=resp), \
+             patch.object(_metrics_mod, "append"):
+            out = server.ask_openrouter_for_code("x")
+        assert out.startswith("ERROR") and "401" in out
+
+    def test_context_and_auth_in_request(self):
+        captured = {}
+        def fake_post(url, headers=None, json=None, timeout=None):
+            captured["url"] = url; captured["headers"] = headers; captured["json"] = json
+            return _orouter("ok")
+        with patch.object(server, "OPENROUTER_API_KEY", "sk-xyz"), \
+             patch.object(server, "OPENROUTER_MODEL", "qwen/q"), \
+             patch("httpx.post", side_effect=fake_post), \
+             patch.object(_metrics_mod, "append"):
+            server.ask_openrouter_for_code("add a method", context="class Foo: pass")
+        assert captured["headers"]["Authorization"] == "Bearer sk-xyz"
+        assert "/chat/completions" in captured["url"]
+        user_msg = captured["json"]["messages"][-1]["content"]
+        assert "class Foo: pass" in user_msg and "add a method" in user_msg
+
+    def test_explicit_model_overrides_env(self):
+        captured = {}
+        def fake_post(url, headers=None, json=None, timeout=None):
+            captured["json"] = json; return _orouter("ok")
+        with patch.object(server, "OPENROUTER_API_KEY", "sk"), \
+             patch.object(server, "OPENROUTER_MODEL", "env/model"), \
+             patch("httpx.post", side_effect=fake_post), \
+             patch.object(_metrics_mod, "append"):
+            server.ask_openrouter_for_code("x", model="explicit/model")
+        assert captured["json"]["model"] == "explicit/model"
+
+    def test_logs_metric_with_openrouter_provider(self):
+        captured = []
+        with patch.object(server, "OPENROUTER_API_KEY", "sk"), \
+             patch.object(server, "OPENROUTER_MODEL", "qwen/q"), \
+             patch("httpx.post", return_value=_orouter("code")), \
+             patch.object(_metrics_mod, "append", side_effect=lambda r: captured.append(r)):
+            server.ask_openrouter_for_code("x")
+        rec = captured[-1]
+        assert rec["phase"] == "ollama_call"
+        assert rec["meta"]["provider"] == "openrouter"
+        assert rec["outcome"] == "success"

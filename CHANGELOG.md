@@ -28,5 +28,10 @@ project aims to follow [Semantic Versioning](https://semver.org/).
 - 170k per-subtask context budget on Planner/Reviewer, verified post-run via
   `check_token_budget`.
 - `mmf-plugin.htm` — a single-page visual reference for the plugin.
+- `[openrouter]` flag and `ask_openrouter_for_code` tool — an alternative
+  Worker-generation backend (OpenRouter, OpenAI-compatible) selectable per run,
+  separate from the Ollama path. Configured via `OPENROUTER_API_KEY` /
+  `OPENROUTER_MODEL`. Added `.env.example` and a README "Configuration" section
+  centralizing where every workflow model is set.
 
 [Unreleased]: https://github.com/Adam-Luciano-MDB/multi-model-flow

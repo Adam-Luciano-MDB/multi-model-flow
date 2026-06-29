@@ -204,6 +204,34 @@ alias with an exact ID (e.g. `claude-opus-4-8`) in the agent's frontmatter.
 Never route planning or routine review to Haiku — the JSON contracts require
 reasoning about trade-offs that Haiku handles poorly under ambiguous specs.
 
+### Configuration — choosing models across the workflow
+
+There are two places to set models, by role. See [`.env.example`](.env.example)
+for the full template.
+
+| Role | Where to set it | Notes |
+|------|-----------------|-------|
+| **Planner** (plans) | `model:` in [`agents/planner.md`](agents/planner.md) | Default `opus`. |
+| **Worker** (adapts drafts, writes files) | `model:` in [`agents/worker.md`](agents/worker.md) | Default `haiku`. |
+| **Reviewer** (reviews) | `model:` in [`agents/reviewer.md`](agents/reviewer.md) | Default `sonnet` (escalates to `opus`). |
+| **Worker generation — Ollama** | `OLLAMA_DEFAULT_MODEL` env (or `[model:]`) | Unset → auto-selected. |
+| **Worker generation — OpenRouter** | `OPENROUTER_API_KEY` + `OPENROUTER_MODEL` env, enabled with `[openrouter]` | Separate backend from Ollama. |
+
+The three **Claude tiers** run through Claude Code's Agent tool, so their models
+live in the agent frontmatter (use tier aliases like `opus`/`sonnet`/`haiku` or
+pinned IDs like `claude-opus-4-8`). The **Worker-generation backend** (the
+local-LLM role) is Ollama by default; pass `[openrouter]` to use OpenRouter
+instead — they're independent, so configuring one never affects the other.
+
+```bash
+# Example: use OpenRouter for worker generation
+export OPENROUTER_API_KEY=sk-or-...
+export OPENROUTER_MODEL=qwen/qwen-2.5-coder-32b-instruct
+# then, in Claude Code:
+#   /mmf [openrouter] Build a CSV parser with unit tests.
+#   /mmf [openrouter] [model:anthropic/claude-3.5-sonnet] Refactor the auth module.
+```
+
 ---
 
 ## Token & context budgets
@@ -428,7 +456,8 @@ All supported flags (placed anywhere in the argument text):
 |------------------|---------|------------------------------------------------------|
 | _(plain text)_   | —       | The development task description (required)          |
 | `[auto]`         | off     | Skip the high-risk plan confirmation halt            |
-| `[model:<name>]` | —       | Pin a specific Ollama model; skips the auto-probe and scoring |
+| `[model:<name>]` | —       | Pin the Worker-generation model (Ollama tag or OpenRouter id); skips the auto-probe and scoring |
+| `[openrouter]`   | off     | Use **OpenRouter** as the Worker-generation backend instead of Ollama (separate path; skips the Ollama probe). Requires `OPENROUTER_API_KEY`; model from `[model:<id>]` or `OPENROUTER_MODEL`. Falls back to Haiku if unconfigured. |
 | `[ollama-only]`  | off     | Ollama writes the code; a Haiku agent writes it to the file verbatim (no adaptation). Falls back to Haiku if Ollama is offline. |
 | `[ollama-agent]` | off     | Ollama drives the whole step via its **own tool-calling loop** (reads context, writes files) — no Haiku Worker. Only for models strong at tool calling; falls back to Haiku if the model doesn't call tools. |
 | `[fast-select]`  | off     | Skip llm-checker scoring at probe time; just use the first installed model |
@@ -491,6 +520,7 @@ to use** above.
 - `list_models_for_selection` — installed models as a numbered selection list (first = default); used for the runtime model pick
 - `ask_local_model(model, prompt, system)` — raw generation; when `model` is omitted, uses `OLLAMA_DEFAULT_MODEL` if set, else the first installed model
 - `ask_local_model_for_code(prompt, context, language, model)` — code-optimised wrapper; when `model` is omitted, resolves to the first installed model (no hardcoded preference)
+- `ask_openrouter_for_code(prompt, context, language, model)` — same, but generates via **OpenRouter** (the `[openrouter]` backend); needs `OPENROUTER_API_KEY`, model from arg or `OPENROUTER_MODEL`
 - `run_ollama_coding_agent(task, model, context, work_dir, max_iterations)` — runs a tool-calling loop where the local model reads/writes files itself (file access sandboxed to `work_dir`); powers the `[ollama-agent]` flag. Requires a tool-call-capable model.
 - `get_model_context_length(model)` — the model's max context window (tokens), read from Ollama `/api/show`; use it to know whether a model can hold a prompt before sending
 - `estimate_context_fit(paths_json, model, extra_chars)` — whether a set of context files (+ instruction) fits a model's window; drives the per-step chunking decision

@@ -1,7 +1,7 @@
 ---
 name: mmf
 description: Planner → Worker → Reviewer pipeline for cost-optimised coding. Opus plans, Haiku implements (+ local Ollama if available), Sonnet reviews.
-argument-hint: <task description> [auto] [model:<ollama-model>] [ollama-only] [ollama-agent] [fast-select]
+argument-hint: <task description> [auto] [model:<model>] [openrouter] [ollama-only] [ollama-agent] [fast-select]
 allowed-tools: [Agent, TodoWrite, AskUserQuestion, mcp__plugin_multi-model-flow_ollama-local__open_metrics_dashboard]
 ---
 
@@ -16,6 +16,7 @@ Parse the arguments:
 - **ollamaOnly** — set if `[ollama-only]` appears; Ollama writes the code, a Haiku agent writes it to the file verbatim (no adaptation)
 - **ollamaAgent** — set if `[ollama-agent]` appears; the Ollama model drives the whole step via its own tool-calling loop (reads context, writes files) — no Haiku Worker. Only use with models strong at tool/function calling; falls back to Haiku if the model doesn't call tools
 - **fastSelect** — set if `[fast-select]` appears; skips llm-checker scoring at probe time and just uses the first installed model
+- **openrouter** — set if `[openrouter]` appears; use **OpenRouter** as the Worker-generation backend instead of Ollama (the Ollama probe/selection is skipped entirely). Requires `OPENROUTER_API_KEY`; the model is `[model:<id>]` or the `OPENROUTER_MODEL` env var
 
 Make a numbered todo list covering all four phases before you start, then tick off each item as you complete it.
 
@@ -30,6 +31,10 @@ Make a numbered todo list covering all four phases before you start, then tick o
    mmf (multi-model-flow) | planner: opus | worker: haiku | reviewer: sonnet
    Metrics dashboard: http://localhost:8765 (auto-started above)
    ```
+
+2b. **Choose the Worker-generation backend** (Ollama vs OpenRouter — they are separate):
+   - **If the `openrouter` flag is set**: GEN_BACKEND = `openrouter`. Set GEN_MODEL = pinnedModel (if `[model:<id>]` was passed) or the server's `OPENROUTER_MODEL` env var. **Skip steps 3, 4, and 4b entirely** (no Ollama probe or selection — keep the two backends separate). Update the banner: `worker: haiku + openrouter:GEN_MODEL`. If `OPENROUTER_API_KEY` is unset the generation tool will return an ERROR at use time, and the Worker falls back to Haiku-only generation (handled in Phase 2). Then go to Phase 1.
+   - **Otherwise**: GEN_BACKEND = `ollama` — continue with steps 3–5 below.
 
 3. Spawn a **Haiku agent** whose sole job is to call the `ollama-local list_local_models` MCP tool and return the raw result.
 
@@ -111,7 +116,7 @@ Keep a running list of all files written across all steps.
 
 10. For each step in `plan.steps`, in order:
 
-    **Context-fit pre-check** (only if OLLAMA_MODEL is set): spawn a **Haiku agent** to call `ollama-local estimate_context_fit` with `paths_json` = the step's `context_files`, `model` = OLLAMA_MODEL, and `extra_chars` = length of the step instruction. Read the returned `fits` flag.
+    **Context-fit pre-check** (only when GEN_BACKEND is `ollama` and OLLAMA_MODEL is set — the chunking path is Ollama-only): spawn a **Haiku agent** to call `ollama-local estimate_context_fit` with `paths_json` = the step's `context_files`, `model` = OLLAMA_MODEL, and `extra_chars` = length of the step instruction. Read the returned `fits` flag. (When GEN_BACKEND is `openrouter`, skip this and go straight to the generation path.)
     - If `fits` is true (or no context_files) → proceed to the normal path (a0 / a / b below).
     - If `fits` is **false** — the step's context exceeds the Ollama model's window → use the **chunked path with per-step Sonnet check** below instead of a0/a/b.
 
@@ -127,7 +132,7 @@ Keep a running list of all files written across all steps.
 
     Skip a0/a/b for a step handled by a-chunk.
 
-    **a0. Ollama agentic worker** (only when `ollamaAgent` is set AND OLLAMA_MODEL is set, and the step fit the context window) — the local model does the tool calling itself, replacing the Haiku Worker for this step:
+    **a0. Ollama agentic worker** (only when `ollamaAgent` is set AND GEN_BACKEND is `ollama` AND OLLAMA_MODEL is set, and the step fit the context window) — the local model does the tool calling itself, replacing the Haiku Worker for this step. (The agentic tool-loop is Ollama-only; under `[openrouter]` skip a0 and use the generation path in `a`.):
     - Spawn a **Haiku agent** as a thin driver whose only job is to call the `ollama-local run_ollama_coding_agent` MCP tool with:
       - `task`: the step `instruction` plus `target_file` and a note to read any `context_files` first
       - `context`: the plan JSON (or the relevant slice)
@@ -136,13 +141,16 @@ Keep a running list of all files written across all steps.
     - If the result starts with `ERROR`, or `status` is `no_tool_calls` (the model didn't call any tools — it isn't tool-capable enough), or no files were written: warn `⚠ [ollama-agent] OLLAMA_MODEL did not complete the step via tool calls — falling back to the Haiku Worker.` and fall through to sub-steps a/b below.
     - This flag is **opt-in** and only appropriate for models strong at tool/function calling. File writes go straight to disk (sandboxed to the project dir), bypassing the Haiku Worker.
 
-    **a. Ollama generation** (only if OLLAMA_MODEL is set, and not already handled by a0):
-    Spawn a **Haiku agent** that calls `ollama-local ask_local_model_for_code` with:
+    **a. Worker generation** (only if a generation backend is active, and not already handled by a0) — backend-aware:
+    Spawn a **Haiku agent** that calls the generation tool for the active backend:
+    - **GEN_BACKEND is `ollama`** → `ollama-local ask_local_model_for_code` with `model`: OLLAMA_MODEL
+    - **GEN_BACKEND is `openrouter`** → `ollama-local ask_openrouter_for_code` with `model`: GEN_MODEL (the tool reads `OPENROUTER_API_KEY` / `OPENROUTER_MODEL` from the environment)
+
+    In both cases pass:
     - `prompt`: the step instruction
     - `language`: inferred from the target_file extension using this map — `.py`→Python, `.ts`/`.tsx`→TypeScript, `.js`/`.jsx`→JavaScript, `.go`→Go, `.rs`→Rust, `.java`→Java, `.rb`→Ruby, `.sh`→Bash, `.sql`→SQL, `.html`→HTML, `.css`→CSS
-    - `model`: OLLAMA_MODEL
 
-    If the result does not start with "ERROR", store it as `ollamaOutput`.
+    If the result does not start with "ERROR", store it as `ollamaOutput` (the Worker draft from whichever backend). If it starts with "ERROR" (e.g. OpenRouter key missing, or Ollama offline), leave `ollamaOutput` unset — the Worker falls back to Haiku-only generation in step b.
 
     **b. Write step** — choose path based on flags:
 
@@ -218,7 +226,7 @@ Keep a running list of all files written across all steps.
     - `phase`: `"workflow"`
     - `model`: the tiers actually used, joined with `+` (e.g. `"opus+devstral+haiku+sonnet"`)
     - `outcome`: the final verdict string (e.g. `"approved"`, `"approved_with_notes"`, `"rejected_no_replan"`, `"test_gate_failed"`, `"high_risk"`, `"execution_failed"`)
-    - `metadata_json`: a JSON string — `{"task":"<first 80 chars of task>","steps_planned":N,"files_written":N,"retries":N,"chunked_steps":N,"lighter_fix_attempts":N,"tests_passed":true|false|null,"ollama_model":"<model or empty string>","claude_calls":{"opus":N,"fable":N,"sonnet":N,"haiku":N}}`
+    - `metadata_json`: a JSON string — `{"task":"<first 80 chars of task>","steps_planned":N,"files_written":N,"retries":N,"chunked_steps":N,"lighter_fix_attempts":N,"tests_passed":true|false|null,"gen_backend":"ollama|openrouter|none","gen_model":"<worker model or empty>","claude_calls":{"opus":N,"fable":N,"sonnet":N,"haiku":N}}`
 
 17. **Token budget check** — spawn a **Haiku agent** to call `ollama-local check_token_budget` (limit 170000). If it reports any sub-agent over budget, surface the warning to the user verbatim (e.g. `⚠ planner: peak context ~210k tokens — exceeded the 170k budget; consider splitting the task`). The Planner and Reviewer carry the 170k context-budget instruction, but it is guidance the model may exceed; this check verifies it against the real transcript token counts after the run. (A skill cannot hard-cap a sub-agent's context, so this is a check-and-warn, not a hard stop.)
 

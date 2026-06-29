@@ -24,6 +24,13 @@ OLLAMA_BASE = os.environ.get("OLLAMA_BASE_URL", "http://localhost:11434")
 DEFAULT_MODEL = os.environ.get("OLLAMA_DEFAULT_MODEL", "")
 TIMEOUT = int(os.environ.get("OLLAMA_TIMEOUT", "1500"))  # seconds — default 25 minutes
 
+# OpenRouter — an optional alternative Worker-generation backend (separate from
+# Ollama). Used only when the run passes the [openrouter] flag. The Ollama path
+# is unchanged; this is a parallel backend, not a replacement.
+OPENROUTER_BASE = os.environ.get("OPENROUTER_BASE_URL", "https://openrouter.ai/api/v1")
+OPENROUTER_API_KEY = os.environ.get("OPENROUTER_API_KEY", "")
+OPENROUTER_MODEL = os.environ.get("OPENROUTER_MODEL", "")  # e.g. qwen/qwen-2.5-coder-32b-instruct
+
 # Rough RAM-to-model guidance for coding models. Each entry: (min_gb, model, note).
 # Ordered largest-first so the recommender picks the most capable model that fits.
 MODEL_GUIDANCE = [
@@ -319,6 +326,98 @@ def ask_local_model_for_code(
         full_prompt = f"Context (existing code):\n{context}\n\nTask:\n{prompt}"
 
     return ask_local_model(model=model, prompt=full_prompt, system=system)
+
+
+def _code_system_prompt(language: str) -> str:
+    """Shared system prompt for code generation (used by both backends)."""
+    lang_hint = f" in {language}" if language else ""
+    return (
+        f"You are an expert software engineer. "
+        f"Generate clean, idiomatic code{lang_hint}. "
+        "Output only the requested code with no markdown fences, no explanations, "
+        "and no comments beyond what is necessary to understand non-obvious logic. "
+        "Match the style and conventions visible in any provided context."
+    )
+
+
+@mcp.tool()
+def ask_openrouter_for_code(
+    prompt: str,
+    context: str = "",
+    language: str = "",
+    model: str = "",
+) -> str:
+    """
+    Code generation via OpenRouter — an alternative Worker-generation backend to
+    Ollama (used when the workflow runs with the [openrouter] flag). Independent
+    of the Ollama path.
+
+    Requires OPENROUTER_API_KEY in the environment. The model resolves to the
+    `model` argument, else the OPENROUTER_MODEL env var (e.g.
+    'qwen/qwen-2.5-coder-32b-instruct'). Returns the generated code, or a string
+    starting with "ERROR:".
+
+    Args:
+        prompt: What to implement or fix.
+        context: Existing file content or surrounding code to consider.
+        language: Target programming language (optional but recommended).
+        model: OpenRouter model id. When empty, uses OPENROUTER_MODEL.
+    """
+    if not OPENROUTER_API_KEY:
+        return "ERROR: OPENROUTER_API_KEY is not set. Export it to use the [openrouter] backend."
+    model = model or OPENROUTER_MODEL
+    if not model:
+        return "ERROR: no OpenRouter model configured. Set OPENROUTER_MODEL or pass [model:<id>]."
+
+    full_prompt = prompt
+    if context:
+        full_prompt = f"Context (existing code):\n{context}\n\nTask:\n{prompt}"
+    messages = [
+        {"role": "system", "content": _code_system_prompt(language)},
+        {"role": "user", "content": full_prompt},
+    ]
+    t0 = time.time()
+    result = ""
+    try:
+        response = httpx.post(
+            f"{OPENROUTER_BASE}/chat/completions",
+            headers={"Authorization": f"Bearer {OPENROUTER_API_KEY}"},
+            json={"model": model, "messages": messages},
+            timeout=TIMEOUT,
+        )
+        response.raise_for_status()
+        choices = response.json().get("choices", [])
+        result = (choices[0].get("message", {}).get("content") if choices else "") or ""
+        if not result:
+            result = "ERROR: OpenRouter returned an empty response."
+        return result
+    except httpx.ConnectError:
+        result = "ERROR: could not reach OpenRouter. Check your network / OPENROUTER_BASE_URL."
+        return result
+    except httpx.TimeoutException:
+        result = f"ERROR: OpenRouter request timed out after {TIMEOUT}s."
+        return result
+    except httpx.HTTPStatusError as e:
+        result = (f"ERROR: OpenRouter returned HTTP {e.response.status_code} "
+                  f"(check the model id and that your API key has access).")
+        return result
+    except Exception as e:
+        result = f"ERROR: {e}"
+        return result
+    finally:
+        # Logged as a generation call so it shows in the dashboard's worker-call
+        # section, tagged with the openrouter provider.
+        _append_metric({
+            "phase": "ollama_call",
+            "model": model,
+            "outcome": "error" if result.startswith("ERROR") else "success",
+            "meta": {
+                "prompt_chars": len(full_prompt),
+                "response_chars": len(result),
+                "duration_ms": int((time.time() - t0) * 1000),
+                "provider": "openrouter",
+            },
+        })
 
 
 # ── Ollama agentic worker (opt-in; for tool-call-capable models) ──────────────
