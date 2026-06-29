@@ -122,31 +122,36 @@ User task description
        └────────────┤
                     │ JSON plan
                     ▼
-          ┌────────────────────────────────────┐
-          │  Ollama probe + model selection    │  ← once per run (runs at startup)
-          │  llm-checker score → first installed│
-          │  (runtime pick unless auto/pinned) │
-          └──────────┬─────────────────────────┘
-          offline ▼  │ model found
-                     ▼
+          ┌──────────────────────────────────────────────┐
+          │  Worker-generation backend  (once per run)   │
+          │  default → OLLAMA: probe + llm-checker score │
+          │     → first installed (runtime pick)         │
+          │  [openrouter] → OPENROUTER: OPENROUTER_MODEL  │
+          │     or [model:] (skips the Ollama probe)     │
+          └──────────┬───────────────────────────────────┘
+          unavailable ▼  │ backend ready
+                         ▼
         ┌──────────────────────────────────────────────┐
         │  per step:                                   │
         │                                              │
-        │  estimate_context_fit → fits ollama window?  │
+        │  ── OpenRouter backend ──                    │
+        │    openrouter draft (haiku driver) →         │
+        │    worker (haiku) adapts + writes            │
         │                                              │
+        │  ── Ollama backend ──                        │
+        │  estimate_context_fit → fits ollama window?  │
         │  YES → path by flag:                         │
-        │    default:      ollama draft (haiku) →      │
-        │                  worker (haiku) adapts+writes │
+        │    default:      ollama draft → worker       │
+        │                  (haiku) adapts + writes      │
         │    [ollama-only]: ollama draft → haiku writes │
         │                  it verbatim                  │
         │    [ollama-agent]: ollama tool-call loop      │
-        │                  writes files (→ worker on    │
-        │                  failure)                     │
+        │                  writes files (→ worker fb)   │
+        │  NO (overflow) → chunk: haiku splits →        │
+        │    ollama gens → haiku stitches →            │
+        │    SONNET checks step (→ worker fb)          │
         │                                              │
-        │  NO (overflow) → chunk path:                 │
-        │    haiku chunks → ollama gens each →         │
-        │    haiku stitches → SONNET checks step       │
-        │    (→ worker fallback if check fails)        │
+        │  (any backend unavailable → Haiku-only)      │
         └──────────────┬───────────────────────────────┘
                        │ files_written
                        ▼
