@@ -17,6 +17,10 @@ Once installed, invoke it from any project with the **`/mmf`** slash command.
   If a local model is running, it pre-generates code for each
   step; the Haiku Worker adapts and writes the final file. Falls back to
   Haiku-only when Ollama is offline.
+- **OpenRouter backend** — prefer a hosted model over a local one? The
+  `[openrouter]` flag routes Worker generation through OpenRouter (any model id)
+  instead of Ollama — a separate, opt-in backend (`OPENROUTER_API_KEY` +
+  `OPENROUTER_MODEL`).
 - **Plan confidence** — if Opus scores its own plan below 7/10, Fable refines
   it (or Opus self-validates if Fable is unavailable). Never halts; warns and
   continues.
@@ -499,6 +503,11 @@ to use** above.
 | _default_ | Haiku Worker adapts Ollama's draft | Ollama gives a head start; Haiku ensures it fits the codebase |
 | `[ollama-only]` | Haiku writes Ollama's output **verbatim** | You trust the model's code but not its tool use |
 | `[ollama-agent]` | **Ollama itself**, via its own tool-calling loop | The model is strong at tool/function calling and you want it to do the whole step |
+
+> **Not using Ollama?** Add `[openrouter]` to generate via **OpenRouter** instead
+> of a local model (the Haiku Worker still adapts/writes). It's a separate backend —
+> the Ollama probe is skipped, the model comes from `OPENROUTER_MODEL` or `[model:]`,
+> and `[ollama-agent]`/chunking stay Ollama-only. See **Configuration** above.
 
 > **`[ollama-agent]` details.** This runs `run_ollama_coding_agent` in the MCP
 > server: the local model is given `read_file` / `write_file` / `list_files`

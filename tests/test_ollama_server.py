@@ -678,15 +678,29 @@ class TestAskOpenRouterForCode:
             out = server.ask_openrouter_for_code("x")
         assert out.startswith("ERROR") and "model" in out.lower()
 
-    def test_http_error(self):
-        err = httpx.HTTPStatusError("bad", request=MagicMock(), response=MagicMock(status_code=401))
+    def test_http_error_surfaces_body_message(self):
+        err_resp = MagicMock(status_code=402)
+        err_resp.json.return_value = {"error": {"message": "Insufficient credits"}}
+        err = httpx.HTTPStatusError("bad", request=MagicMock(), response=err_resp)
         resp = MagicMock(); resp.raise_for_status.side_effect = err
         with patch.object(server, "OPENROUTER_API_KEY", "sk"), \
              patch.object(server, "OPENROUTER_MODEL", "qwen/q"), \
              patch("httpx.post", return_value=resp), \
              patch.object(_metrics_mod, "append"):
             out = server.ask_openrouter_for_code("x")
-        assert out.startswith("ERROR") and "401" in out
+        assert out.startswith("ERROR") and "402" in out and "Insufficient credits" in out
+
+    def test_http_error_non_json_body_is_safe(self):
+        err_resp = MagicMock(status_code=500)
+        err_resp.json.side_effect = ValueError("not json")
+        err = httpx.HTTPStatusError("bad", request=MagicMock(), response=err_resp)
+        resp = MagicMock(); resp.raise_for_status.side_effect = err
+        with patch.object(server, "OPENROUTER_API_KEY", "sk"), \
+             patch.object(server, "OPENROUTER_MODEL", "qwen/q"), \
+             patch("httpx.post", return_value=resp), \
+             patch.object(_metrics_mod, "append"):
+            out = server.ask_openrouter_for_code("x")
+        assert out.startswith("ERROR") and "500" in out
 
     def test_context_and_auth_in_request(self):
         captured = {}

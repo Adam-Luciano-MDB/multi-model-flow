@@ -381,7 +381,10 @@ def ask_openrouter_for_code(
     try:
         response = httpx.post(
             f"{OPENROUTER_BASE}/chat/completions",
-            headers={"Authorization": f"Bearer {OPENROUTER_API_KEY}"},
+            headers={
+                "Authorization": f"Bearer {OPENROUTER_API_KEY}",
+                "X-Title": "multi-model-flow",  # optional attribution, harmless
+            },
             json={"model": model, "messages": messages},
             timeout=TIMEOUT,
         )
@@ -398,8 +401,19 @@ def ask_openrouter_for_code(
         result = f"ERROR: OpenRouter request timed out after {TIMEOUT}s."
         return result
     except httpx.HTTPStatusError as e:
-        result = (f"ERROR: OpenRouter returned HTTP {e.response.status_code} "
-                  f"(check the model id and that your API key has access).")
+        # Surface OpenRouter's own error message (e.g. insufficient credits, bad
+        # model id) when present — far more actionable than the bare status code.
+        detail = ""
+        try:
+            body = e.response.json()
+            if isinstance(body, dict):
+                msg = body.get("error", {}).get("message", "")
+                detail = msg if isinstance(msg, str) else ""
+        except Exception:
+            detail = ""
+        result = (f"ERROR: OpenRouter returned HTTP {e.response.status_code}"
+                  + (f" — {detail}" if detail else "")
+                  + " (check the model id and that your API key has access).")
         return result
     except Exception as e:
         result = f"ERROR: {e}"
